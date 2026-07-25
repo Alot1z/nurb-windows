@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>nurb</title>
+<style>
+  :root {
+    --bg: #16181d; --panel: #1d2027; --line: #2b2f38;
+    --text: #e6e8ec; --dim: #868d9b; --accent: #6ee7a8; --bad: #f87171;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: var(--bg); color: var(--text);
+    height: 100vh; display: grid; grid-template-columns: 220px 1fr; overflow: hidden;
+  }
+  aside { background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; }
+  aside h1 { font-size: 13px; font-weight: 600; padding: 14px 16px; border-bottom: 1px solid var(--line); letter-spacing: .08em; }
+  aside h1 span { color: var(--dim); font-weight: 400; margin-left: 6px; letter-spacing: 0; }
+  #list { flex: 1; overflow-y: auto; padding: 6px; }
+  .item { padding: 8px 10px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+  .item:hover { background: #23272f; }
+  .item.active { background: #2c313b; }
+  .item .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item .ms { color: var(--dim); font-size: 11px; }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; }
+  .dot.bad { background: var(--bad); }
+  .dot.busy { animation: pulse .6s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .25; } }
+  main { position: relative; overflow: hidden; }
+  /* Absolute + 100% keeps layout size independent of the drawing-buffer size.
+     Without this, setSize() changes the canvas's layout box, which re-fires the
+     ResizeObserver, which calls setSize() again -- a resize loop that flickers. */
+  canvas { display: block; position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; }
+  /* The canvas is appended last, so overlays need to be lifted above it. */
+  #hud, #err, #reframe, #empty { z-index: 1; }
+  #hud {
+    position: absolute; left: 16px; bottom: 14px; color: var(--dim);
+    font-size: 11px; pointer-events: none; line-height: 1.7;
+  }
+  #hud b { color: var(--text); font-weight: 600; }
+  #err {
+    position: absolute; inset: auto 16px 14px 16px; max-height: 42%; overflow: auto;
+    background: #2a1618; border: 1px solid #5b2b2f; color: #ffb4b4;
+    padding: 12px 14px; border-radius: 8px; white-space: pre-wrap;
+    font-size: 11px; display: none;
+  }
+  #reframe {
+    position: absolute; top: 14px; right: 14px; display: none;
+    background: var(--panel); color: var(--text); border: 1px solid var(--line);
+    padding: 7px 12px; border-radius: 6px; cursor: pointer; font: inherit; font-size: 11px;
+  }
+  #reframe:hover { border-color: var(--dim); }
+  #empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--dim); }
+</style>
+</head>
+<body>
+<aside>
+  <h1>nurb<span id="conn">connecting</span></h1>
+  <div id="list"></div>
+</aside>
+<main>
+  <div id="empty">no parts yet &mdash; nurb new &lt;name&gt;</div>
+  <button id="reframe">reframe</button>
+  <div id="hud"></div>
+  <div id="err"></div>
+</main>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.169.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.169.0/examples/jsm/"
+}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+const parts = new Map();
+let current = null, mesh = null, lastSize = null;
+
+// ---- scene (Z-up, matching CAD) ----
+const main = document.querySelector('main');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x16181d);
+
+const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 10000);
+camera.up.set(0, 0, 1);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+main.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.12;
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x404050, 2.2));
+const key = new THREE.DirectionalLight(0xffffff, 1.8);
+key.position.set(1, -1.4, 2);
+scene.add(key);
+
+const grid = new THREE.GridHelper(400, 40, 0x3a3f4a, 0x24272e);
+grid.rotation.x = Math.PI / 2;   // GridHelper is XZ; we want XY
+scene.add(grid);
+
+const material = new THREE.MeshStandardMaterial({
+  color: 0x9aa6b8, metalness: 0.05, roughness: 0.62, flatShading: false,
+});
+
+let lastW = 0, lastH = 0;
+function resize() {
+  const w = main.clientWidth, h = main.clientHeight;
+  if (!w || !h || (w === lastW && h === lastH)) return;   // belt and braces
+  lastW = w; lastH = h;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(main);
+resize();
+
+(function tick() {
+  requestAnimationFrame(tick);
+  controls.update();
+  renderer.render(scene, camera);
+})();
+
+// ---- camera persistence ----
+// A rebuild is a geometry swap, never a camera reset. Reloads restore per part.
+const camKey = n => `nurb.cam.${n}`;
+let saveTimer = null;
+controls.addEventListener('change', () => {
+  if (!current) return;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    localStorage.setItem(camKey(current), JSON.stringify({
+      p: camera.position.toArray(), t: controls.target.toArray(),
+    }));
+  }, 250);
+});
+
+function restoreCamera(name) {
+  try {
+    const s = JSON.parse(localStorage.getItem(camKey(name)));
+    if (!s) return false;
+    camera.position.fromArray(s.p);
+    controls.target.fromArray(s.t);
+    controls.update();
+    return true;
+  } catch { return false; }
+}
+
+function frame(box) {
+  const size = box.getSize(new THREE.Vector3());
+  const mid = box.getCenter(new THREE.Vector3());
+  const span = Math.max(size.x, size.y, size.z) || 10;
+  const dist = span / (2 * Math.tan((camera.fov * Math.PI / 180) / 2)) * 2.1;
+  camera.position.set(mid.x + dist * 0.7, mid.y - dist * 0.75, mid.z + dist * 0.6);
+  controls.target.copy(mid);
+  camera.near = span / 100; camera.far = span * 100;
+  camera.updateProjectionMatrix();
+  controls.update();
+}
+
+// ---- loading ----
+const loader = new GLTFLoader();
+
+async function show(name, { keepCamera }) {
+  const entry = parts.get(name);
+  const err = document.getElementById('err');
+  document.getElementById('empty').style.display = 'none';
+
+  if (entry.error) {
+    err.style.display = 'block';
+    err.textContent = entry.traceback || entry.error;
+    if (mesh) {                              // last good geometry stays, visibly stale
+      mesh.material.transparent = true;
+      mesh.material.opacity = 0.22;
+      mesh.material.needsUpdate = true;
+    }
+    hud(entry);
+    return;
+  }
+  err.style.display = 'none';
+
+  const gltf = await loader.loadAsync(`/glb/${name}.glb?v=${entry.token}`);
+  const geo = [];
+  gltf.scene.traverse(o => { if (o.isMesh) geo.push(o.geometry); });
+  if (!geo.length) return;
+
+  if (mesh) { scene.remove(mesh); mesh.geometry.dispose(); }
+  if (!geo[0].attributes.normal) geo[0].computeVertexNormals();  // never render unlit
+  mesh = new THREE.Mesh(geo[0], material.clone());
+  scene.add(mesh);
+
+  mesh.geometry.computeBoundingBox();
+  const box = mesh.geometry.boundingBox.clone();
+  const size = box.getSize(new THREE.Vector3()).length();
+
+  // Only reframe when the part changed scale enough that the camera is lost.
+  const jumped = lastSize && (size / lastSize > 3 || lastSize / size > 3);
+  const reframe = document.getElementById('reframe');
+  if (!keepCamera) {
+    if (!restoreCamera(name)) frame(box);
+    reframe.style.display = 'none';
+  } else {
+    reframe.style.display = jumped ? 'block' : 'none';
+  }
+  reframe.onclick = () => { frame(box); reframe.style.display = 'none'; };
+  lastSize = size;
+  hud(entry);
+}
+
+window.__nurb = { THREE, scene, camera, controls, get mesh() { return mesh; } };
+
+function hud(e) {
+  document.getElementById('hud').innerHTML = e.error
+    ? `<b>${e.name}</b> &mdash; build failed`
+    : `<b>${e.name}</b><br>${e.bbox.join(' &times; ')} mm<br>${e.ms} ms`;
+}
+
+// ---- part list ----
+function render() {
+  const list = document.getElementById('list');
+  list.innerHTML = '';
+  for (const e of parts.values()) {
+    const row = document.createElement('div');
+    row.className = 'item' + (e.name === current ? ' active' : '');
+    row.innerHTML = `<span class="dot ${e.error ? 'bad' : ''}"></span>`
+      + `<span class="name">${e.name}</span>`
+      + `<span class="ms">${e.error ? 'err' : e.ms + 'ms'}</span>`;
+    row.onclick = () => { current = e.name; render(); show(e.name, { keepCamera: false }); };
+    list.appendChild(row);
+  }
+}
+
+function flash(name) {
+  const rows = [...document.querySelectorAll('.item')];
+  const row = rows.find(r => r.querySelector('.name').textContent === name);
+  if (!row) return;
+  const dot = row.querySelector('.dot');
+  dot.classList.add('busy');
+  setTimeout(() => dot.classList.remove('busy'), 400);
+}
+
+// ---- socket ----
+function connect() {
+  const ws = new WebSocket(`ws://${location.host}/ws`);
+  const conn = document.getElementById('conn');
+  ws.onopen = () => conn.textContent = '';
+  ws.onclose = () => { conn.textContent = 'reconnecting'; setTimeout(connect, 1000); };
+  ws.onmessage = ev => {
+    const msg = JSON.parse(ev.data);
+    if (msg.type === 'sync') {
+      parts.clear();
+      msg.parts.forEach(p => parts.set(p.name, p));
+      if (!current && msg.parts.length) current = msg.parts[0].name;
+      render();
+      if (current) show(current, { keepCamera: false });
+    }
+    if (msg.type === 'rebuilt') {
+      parts.set(msg.name, msg);
+      render();
+      flash(msg.name);
+      if (msg.name === current) show(msg.name, { keepCamera: true });
+    }
+  };
+}
+connect();
+</script>
+</body>
+</html>

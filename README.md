@@ -1,0 +1,100 @@
+# nurb
+
+Agentic CAD for 3D printing.
+
+A part is a Python function. Its keyword defaults are its parameters. `nurb dev`
+watches your parts, rebuilds them on save, and pushes new geometry to a browser
+without moving your camera.
+
+Built on [build123d](https://build123d.readthedocs.io) (OCCT), so parts are real
+B-rep solids with working chamfers, fillets, and STEP export.
+
+## Try it
+
+```bash
+uv run nurb new dispenser
+uv run nurb dev            # http://127.0.0.1:7373
+```
+
+Edit `parts/dispenser.py` and watch it update.
+
+## A part
+
+```python
+from nurb import *
+
+@part
+def dispenser(width=40, depth=30, height=20, wall=2, draft=False):
+    body = Box(width, depth, height)
+    if not draft:
+        body = chamfer(body.edges().filter_by(Axis.Z), length=1)
+    return body
+```
+
+`draft` is optional and passed by the runtime, not the caller. When it's true the
+part should skip its polish pass. `nurb dev` builds in draft by default because
+chamfers dominate build time: on this trivial part it's 18ms polished vs 1ms draft.
+
+## Commands
+
+```
+nurb new <name>     create parts/<name>.py and its card
+nurb dev            watch, rebuild, serve the viewer
+nurb build [part]   build once and report size
+nurb export [part]  write STL/STEP/GLB into build/
+```
+
+A project is any directory with a `parts/` folder. There's no init step.
+
+## Why a long-lived process
+
+Importing build123d costs 45s cold and 2.3s warm. Everything after that is fast:
+build, boolean, chamfer, tessellate, and export together run in about 80ms. So the
+dev server pays the import once and every rebuild afterwards feels instant.
+
+## Layout
+
+```
+parts/<name>.py     the part
+parts/<name>.md     its card: what it is, why, what not to retry
+build/              generated, gitignored
+```
+
+Cards are colocated with parts and share a basename. That's the whole link; a
+rename is `git mv` on two files.
+
+## Not built yet
+
+- `nurb check` — printability rules as assertions (overhangs, wall thickness,
+  slivers, stability, build volume), with an accepted-warnings baseline per part
+- `nurb extract` — pull shared geometry out of sibling parts into `system.py`
+  once duplication actually shows up, rather than scaffolding it up front
+- Headless PNG render so an agent can see its own work
+- Parameter sliders in the viewer, driven by the same keyword defaults
+- Vendored three.js so the viewer works offline
+
+## Debugging the viewer
+
+`window.__nurb` exposes `{ THREE, scene, camera, controls, mesh }`.
+
+## License
+
+[FSL-1.1-MIT](LICENSE). Source-available for any purpose except building a competing
+product, and converts to plain MIT two years after each release.
+
+Copyright 2026 Ordinary Systems LLC.
+
+### Third-party notices
+
+nurb uses **Open CASCADE Technology** (OCCT) for all B-rep geometry, reached through
+[build123d](https://github.com/gumyr/build123d) (Apache-2.0) and the `OCP` bindings
+(Apache-2.0). OCCT is licensed under
+[LGPL-2.1 with an additional exception](https://dev.opencascade.org/resources/licensing).
+
+nurb does not redistribute OCCT. It is installed separately as a dependency, and
+dynamically linked at runtime. If you ever bundle nurb into a single-file
+distribution that embeds the OCCT binaries, ship a copy of the OCCT license with it
+and keep the library replaceable, per LGPL.
+
+Other dependencies: trimesh (MIT), watchdog (Apache-2.0), websockets (BSD-3-Clause),
+numpy (BSD-3-Clause).

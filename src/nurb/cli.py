@@ -1,0 +1,142 @@
+"""nurb command line."""
+
+import argparse
+import asyncio
+import pathlib
+import sys
+
+PART_TEMPLATE = '''from nurb import *
+
+
+@part
+def {name}(width=40, depth=30, height=20, wall=2, draft=False):
+    body = Box(width, depth, height)
+    if not draft:
+        body = chamfer(body.edges().filter_by(Axis.Z), length=1)
+    return body
+'''
+
+CARD_TEMPLATE = """# {name}
+
+## What it is
+
+## Design notes
+
+## Don't
+
+## Changelog
+"""
+
+
+def project_root(start=None):
+    here = pathlib.Path(start or pathlib.Path.cwd()).resolve()
+    for d in [here, *here.parents]:
+        if (d / "parts").is_dir():
+            return d
+    return here
+
+
+def cmd_new(args):
+    root = project_root()
+    parts = root / "parts"
+    parts.mkdir(parents=True, exist_ok=True)
+    name = args.name.replace("-", "_")
+    py, md = parts / f"{name}.py", parts / f"{name}.md"
+    if py.exists():
+        sys.exit(f"{py} already exists")
+    py.write_text(PART_TEMPLATE.format(name=name))
+    md.write_text(CARD_TEMPLATE.format(name=name))
+    print(f"  {py.relative_to(root)}\n  {md.relative_to(root)}")
+
+
+def _resolve(root, name):
+    from . import builder
+
+    found = builder.find_parts(root)
+    if not found:
+        sys.exit("no parts found (expected a parts/ directory)")
+    if name is None:
+        return found
+    match = [p for p in found if p.stem == name.replace("-", "_")]
+    if not match:
+        sys.exit(f"no part named {name}. have: {', '.join(p.stem for p in found)}")
+    return match
+
+
+def cmd_build(args):
+    from . import builder
+
+    root = project_root()
+    for path in _resolve(root, args.part):
+        try:
+            shape, params, ms = builder.build(path, draft=args.draft)
+            info = builder.stats(shape)
+            bbox = " x ".join(str(v) for v in info["bbox"])
+            print(f"  {path.stem}: {bbox} mm  {ms:.0f}ms")
+        except Exception as exc:
+            print(f"  {path.stem}: {type(exc).__name__}: {exc}")
+
+
+def cmd_export(args):
+    from build123d import export_step, export_stl
+
+    from . import builder
+
+    root = project_root()
+    out = root / "build"
+    out.mkdir(exist_ok=True)
+    for path in _resolve(root, args.part):
+        shape, _, _ = builder.build(path, draft=False)
+        for fmt in args.formats:
+            target = out / f"{path.stem}.{fmt}"
+            if fmt == "stl":
+                export_stl(shape, str(target))
+            elif fmt == "step":
+                export_step(shape, str(target))
+            elif fmt == "glb":
+                target.write_bytes(builder.to_glb(shape, 0.02))
+            print(f"  {target.relative_to(root)}")
+
+
+def cmd_dev(args):
+    from .server import Server
+
+    root = project_root()
+    server = Server(root, port=args.port, draft=not args.polish)
+    print(f"  building {root.name}/parts")
+    server.rebuild_all()
+    try:
+        asyncio.run(server.run())
+    except KeyboardInterrupt:
+        print("\n  stopped")
+
+
+def main(argv=None):
+    p = argparse.ArgumentParser(prog="nurb", description="agentic CAD for 3D printing")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    s = sub.add_parser("new", help="create a part")
+    s.add_argument("name")
+    s.set_defaults(fn=cmd_new)
+
+    s = sub.add_parser("dev", help="watch parts and serve the viewer")
+    s.add_argument("--port", type=int, default=7373)
+    s.add_argument("--polish", action="store_true", help="build full quality (slower)")
+    s.set_defaults(fn=cmd_dev)
+
+    s = sub.add_parser("build", help="build parts once")
+    s.add_argument("part", nargs="?")
+    s.add_argument("--draft", action="store_true")
+    s.set_defaults(fn=cmd_build)
+
+    s = sub.add_parser("export", help="write STL/STEP/GLB to build/")
+    s.add_argument("part", nargs="?")
+    s.add_argument("--formats", nargs="+", default=["stl", "step"])
+    s.set_defaults(fn=cmd_export)
+
+    args = p.parse_args(argv)
+    args.fn(args)
+
+
+if __name__ == "__main__":
+    main()
