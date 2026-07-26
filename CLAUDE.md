@@ -29,8 +29,9 @@ CLI, the viewer's sliders, the tests, and any future configurator. Never add a
 parallel `PARAMS` dict; the two would drift.
 
 `draft` is optional and injected by the runtime, never passed by callers. When true,
-skip the polish pass. This matters more than it looks: chamfers are most of the build
-cost, so draft mode is the difference between a live loop and a batch job.
+skip the polish pass. Worth 20% on a real part, not the 18x a cube suggested: chamfers
+are 23% of the gridfinity shelf's build. Tessellation, at 620ms against a 470ms build,
+is where the loop latency actually lives.
 
 ## Commands
 
@@ -38,8 +39,11 @@ cost, so draft mode is the difference between a live loop and a batch job.
 nurb new <name>      create parts/<name>.py and its card
 nurb dev             watch, rebuild, serve the viewer on :7373
 nurb build [part]    build once, report size and timing
+nurb check [part]    run the printability rules, --strict for CI
 nurb export [part]   write STL/STEP/GLB into build/
 ```
+
+`uv run pytest` runs the suite, which includes the parts in `examples/`.
 
 A project is any directory containing `parts/`. There is no init step, and there
 never should be.
@@ -49,9 +53,12 @@ never should be.
 ```
 src/nurb/registry.py   @part, signature introspection
 src/nurb/builder.py    load, build, tessellate, GLB
+src/nurb/checks.py     printability rules, convexity, Finding/Context
 src/nurb/server.py     watcher, rebuild, HTTP + websocket on one port
 src/nurb/viewer.html   three.js viewer, Z-up, camera persistence
 src/nurb/cli.py        command surface
+examples/notch/        the real parts, which are also the calibration set
+tests/                 rules and examples, both cases per rule
 docs/core/             research, plan, progress
 ```
 
@@ -75,12 +82,21 @@ table in RESEARCH.md for the full list of what vanishes and what survives.
 What does survive is physics: the print doctrine, sliver thresholds, chamfer sizing
 limits, and chamfer ordering effects.
 
-### Prefer `Select.LAST` over geometric selectors for chamfers
+### Prefer `new_edges` over geometric selectors for chamfers
 
 Each chamfer changes topology, so selectors resolved against pristine geometry drift
-once an earlier chamfer runs. `part.edges() - last` targets exactly what an operation
-just created and sidesteps the problem. Reach for it before falling back on strict
-operation ordering.
+once an earlier chamfer runs. `new_edges(before, combined=after)` returns exactly the
+edges an operation created and sidesteps the problem. It is the algebra-mode
+equivalent of a builder's `Select.LAST`, and algebra mode is what a part file uses, so
+`part.edges() - last` is not available to you. Reach for it before falling back on
+strict operation ordering.
+
+### Two chamfered edges need room between them
+
+More than `2 * chamfer_size` of face, or OCCT fails with `BRep_API: command not done`.
+This is the analogue of Fusion's `ASM_BL_NO_MATE` and it is the single most common way
+a part stops building. The trap: every edge chamfers fine on its own and only the batch
+fails, so testing them one at a time reports that nothing is wrong. Bisect the set.
 
 ### Systems are extracted, never scaffolded
 
@@ -145,7 +161,18 @@ as though every file will be read by a stranger.
 
 ## Current state
 
-The runtime works but has only ever built `Box() - chamfer()`. Every timing number
-and every claim about OCCT robustness comes from that. Phase 1 in
-`docs/core/IMPLEMENTATION.md` exists to fix exactly this, by porting the hardest
-Notch part. **Do not build on top of unproven kernel assumptions.**
+Phases 1 and 2 are done. Two real Notch parts and a calibration coupon live in
+`examples/notch/`; they build to one solid each, match their Fusion originals dimension
+for dimension, and reproduce the sliver baselines their catalog cards recorded. The
+kernel question is settled and the timing numbers come from real geometry.
+
+`nurb check` runs eight printability rules against the solid and reports nothing on any
+of the three, which is the bar: a warning fired at a part that prints fine is a bug in
+the rule. It has already caught one real defect in what Phase 1 shipped, four cosmetic
+chamfers laid into concave junctions.
+
+Phase 3 (agent interface: `nurb rules`, card generation, headless render) is next.
+
+`docs/core/PROGRESS.md` has the findings, including three claims from RESEARCH.md and
+one from Phase 1 that a real part or a real print disproved. Read them before trusting
+anything in this file that sounds like a measurement.
