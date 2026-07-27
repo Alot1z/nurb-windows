@@ -1,36 +1,25 @@
 # nurb
 
-Agentic CAD for 3D printing.
-
-A part is a Python function. Its keyword defaults are its parameters. `nurb dev`
-watches your parts, rebuilds them on save, and pushes new geometry to a browser
-without moving your camera.
-
-Built on [build123d](https://build123d.readthedocs.io) (OCCT), so parts are real
-B-rep solids with working chamfers, fillets, and STEP export.
+Agentic CAD for 3D printing. The user is a language model: your agent writes parts as Python functions, nurb builds them into real B-rep solids ([build123d](https://build123d.readthedocs.io)/OCCT), checks them against print physics, and shows you the result live. You judge, drag sliders, download the STL.
 
 ## Install
 
-nurb is on [PyPI](https://pypi.org/project/nurb/):
-
 ```bash
 uv tool install nurb       # or: pip install nurb
-uvx nurb rules             # or run it without installing anything
 ```
 
-There is nothing to install from npm. The registry blocks the unscoped name for
-everyone, and [`@shpigford/nurb`](https://www.npmjs.com/package/@shpigford/nurb)
-exists only so `npx` users get pointed here instead of a 404.
-
-## Try it
+## Make something
 
 ```bash
-nurb new dispenser
-nurb dev                   # http://127.0.0.1:7373, or the next free port
+nurb new phone_stand
+nurb dev                   # http://127.0.0.1:7373
 ```
 
-Edit `parts/dispenser.py` and watch it update. (Working from a checkout of this
-repo, prefix with `uv run`.)
+Then tell your agent:
+
+> Run `nurb rules`, then make me a phone stand: 15 degree lean, a slot for the charging cable, fits a phone 78mm wide.
+
+`nurb rules` prints the design doctrine (printability, load paths, kernel traps), so the agent knows how to use the tool before it starts. From there it edits `parts/phone_stand.py`, the browser updates on every save without moving your camera, and check findings pin themselves to the geometry. When it looks right: drag the sliders if you want, click `stl`, print. The `stl` and `step` buttons build at whatever the sliders hold, and a `write` button saves your slider values back into the file's defaults, where the agent will see them.
 
 ## A part
 
@@ -38,19 +27,11 @@ repo, prefix with `uv run`.)
 from nurb import *
 
 @part
-def dispenser(width=80.0, height=120.0, wall=2.0, draft=False):
-    body = Box(width, height, wall)
-    if draft:
-        return body
-    bed = body.bounding_box().min.Z
-    keep = body.edges().filter_by(lambda e: e.bounding_box().min.Z > bed)
-    return polish(body, keep, 1.0)
+def phone_stand(width=84.0, lean=15.0, wall=3.0, draft=False):
+    ...
 ```
 
-`draft` is optional and passed by the runtime, not the caller. When it's true the
-part should skip its polish pass. `nurb dev` builds in draft by default: on this
-trivial part it's 18ms polished vs 1ms draft, and on a real one the saving is
-nearer 20%.
+The keyword defaults are the parameters. That one declaration drives the CLI, the viewer's sliders, and the tests; there is no schema to keep in sync. A float is a dimension, an int is a count (its slider steps by one). `draft` is passed by the runtime, not callers: when true, skip the polish pass.
 
 ## Commands
 
@@ -58,7 +39,7 @@ nearer 20%.
 nurb new <name>     create parts/<name>.py and its card
 nurb dev            watch, rebuild, serve the viewer
 nurb build [part]   build once and report size
-nurb check [part]   run the printability rules
+nurb check [part]   run the printability rules, --strict for CI
 nurb rules          print the design doctrine
 nurb card [part]    regenerate a card's AUTO block
 nurb verify [part]  run the doctrine's verification list
@@ -67,52 +48,11 @@ nurb export [part]  write STL and STEP into build/, --formats for GLB
 nurb extract        find duplication across parts
 ```
 
-A project is any directory with a `parts/` folder. There's no init step, and there's
-no such thing as being outside a project: `mkdir -p thing/parts && cd thing && nurb new
-clip` is the whole setup for a one-off.
-
-`nurb dev` serves one project, so two projects means two of them. It takes 7373 if that
-is free and walks up if it is not, printing where it landed, and the sidebar and the
-browser tab both carry the project name so two of them are not mistakable for each
-other.
-
-Names are deliberately boring. The primary user is a language model, and a model that
-has never seen this tool can guess `build`, `check` and `export`. It cannot guess a
-themed alias.
-
-## Why a long-lived process
-
-Importing build123d costs 45s cold and 2.3s warm, and that is the whole argument: the
-dev server pays it once instead of on every save.
-
-What a rebuild costs after that depends on the part. A simple one is 29ms to build and
-1ms to tessellate. The heaviest part in `examples/` is 401ms and 30ms. Draft mode is
-not the lever it looks like: chamfers are 23% of that build, not most of it.
-
-Tessellation used to be the larger half, at 620ms on that part, and almost none of it
-was geometry. `Shape.tessellate` reads its triangles with `for t in poly.Triangles()`,
-and OCP's iterator over that array costs 536ms where reading the same 7790 triangles by
-index costs 6.8ms. `builder._triangulate` does the latter and returns bit-identical
-vertices and faces. It is worth knowing before optimising the wrong thing.
-
-## Layout
-
-```
-parts/<name>.py     the part
-parts/<name>.md     its card: what it is, why, what not to retry
-system.py           optional: shared constants and geometry, importable from a part
-measurements.toml   optional: real-world dimensions with how they were obtained
-printer.toml        optional: which machine this project prints on
-build/              generated, gitignored
-```
-
-Cards are colocated with parts and share a basename. That's the whole link; a
-rename is `git mv` on two files.
+A project is any directory with a `parts/` folder. No init step.
 
 ## Checks
 
-`nurb check` runs the printability rules against the solid rather than an exported
-mesh, so it sees real faces with exact areas and normals instead of triangles.
+The agent cannot see, so `nurb check` is its eyes. Rules run against the exact solid, not a mesh, and findings come back as text with coordinates:
 
 ```
 overhang          downward faces past 45 degrees, bridges told from cantilevers
@@ -125,27 +65,7 @@ projection_ratio  reach over height, for a part cantilevered off a wall
 build_volume      does it fit the printer at all
 ```
 
-`min_wall`'s ray is exact on flat parallel walls and measures the slant through a skewed
-one, so any chord thin enough to change the verdict is corrected by the largest sphere
-tangent at that point, computed against the solid with exact kernel distances. A sphere
-whose far contact is a graze rather than a wall is rejected by the same 0.3 cosine floor
-the ray's exit filter uses, which is what keeps a detent dimple's bowl from reading as a
-thin section of the web it is pressed into.
-
-The bed size belongs to the machine, not to a part, so it is not written on cards.
-A project picks a shipped profile once, in `printer.toml` at the root:
-
-```toml
-profile = "bambu_a1_mini"
-```
-
-Any check setting can be overridden in the same file, machine-wide. A card still wins
-for what its part has justified. `nurb check --printer prusa_mk4s` answers "does this
-fit that machine" without touching the file, and naming a profile that does not exist
-lists the ones that do.
-
-Every part carries what it has already justified on its card, so a known finding is
-silent and a new one is a regression:
+Name your machine once in `printer.toml` (`profile = "bambu_a1_mini"`), or try another with `nurb check --printer prusa_mk4s`. A part records what it has already justified on its card, so known findings stay silent and new ones are regressions:
 
 ```toml
 [part]
@@ -155,140 +75,66 @@ min_wall = 1.0
 sliver = 6
 ```
 
-It reports by default and takes `--strict` for CI, on the grounds that a warning which
-blocks work gets switched off. Findings also show up in `nurb dev`, with a pin on the
-geometry at each one.
+When text is not enough, `nurb render <part>` screenshots the viewer so the agent can look at its own work (`uv sync --extra render && uv run playwright install chromium`, the only part of nurb that wants a browser).
+
+## Cards and measurements
+
+Agents forget everything between sessions, so each part gets a card (`parts/<name>.md`): what it is, why, and a `## Don't` section for what was tried and rejected. `nurb card` regenerates its one machine-written block with what only a build can tell you.
+
+Dimensions an agent cannot derive go in `measurements.toml` with how they were obtained; `measured("bracket_pitch")` returns them, and asking for one that is not there raises instead of letting the model guess. A guessed dimension builds, checks clean, prints, and does not fit.
 
 ## Variants
 
-Some parts in a catalog are the same function flexed rather than new geometry. Those
-ship as variants on the card, not as copies of the file:
+The same function flexed is a variant on the card, not a copy of the file:
 
 ```toml
-[variants.shelf_gridfinity_3x2.params]
+[variants.shelf_3x2.params]
 grid_x = 3
-bracket_count = 6
-
-[variants.shelf_gridfinity_3x2.accepted]
-sliver = 26
 ```
 
-`build`, `check`, `card` and `export` all walk a part's variants the same way they walk
-its default, so a variant gets its own STL, its own baselines and its own line in the
-card's generated block. Four of the sixteen parts in `examples/notch` are variants; the
-alternative was four near-copies of two files, free to drift.
+`build`, `check`, `card` and `export` walk variants like parts, so each gets its own STL and baselines.
 
-## For an agent
-
-The doctrine lives in the package and prints with `nurb rules`: printability, load paths,
-the polish pass, the kernel traps, and what to verify. `SKILL.md` and `AGENTS.md` are ten
-lines each pointing at it, so there is one copy and it cannot drift.
-
-A part explains itself in a card next to it, same basename. Most of it is written by
-hand, including a `## Don't` section that records what was tried and rejected, which is
-the only place that information exists. One fenced block is generated:
+## Layout
 
 ```
-nurb card
+parts/<name>.py     the part
+parts/<name>.md     its card
+system.py           optional: shared constants and geometry
+measurements.toml   optional: real-world dimensions with provenance
+printer.toml        optional: which machine this project prints on
+build/              generated, gitignored
 ```
 
-That block holds what only a build can tell you: bounding box, volume, solid count,
-sliver count against the accepted baseline, projection ratio, check verdict. It carries
-no timestamp, so regenerating it on unchanged geometry produces no diff and a stale card
-shows up in `git diff`. It deliberately does not repeat the parameters, because the
-signature is the parameters and copying them would be the drift the contract forbids.
+## Speed
 
-Dimensions an agent cannot derive go in `measurements.toml` with how they were obtained:
-
-```toml
-[bracket_pitch]
-value = 25.16
-unit = "mm"
-how = "on-center spacing across a run of brackets, measured on the wall"
-```
-
-```python
-from nurb import measured
-pitch = measured("bracket_pitch")
-```
-
-Asking for something that isn't there raises and says so. That failure is the point: a
-guessed dimension produces a part that builds, checks clean, and prints.
-
-`nurb render <part>` writes `build/<part>.png` by screenshotting the viewer, so the image
-is what a human would see. It needs the optional extra, which is the only part of nurb
-that wants a browser:
-
-```
-uv sync --extra render && uv run playwright install chromium
-```
+`nurb dev` is a long-lived process because importing the kernel costs 45s cold. After that, rebuilds run 30 to 400ms depending on the part, which matters because an agent iterates in save-check cycles, dozens per part.
 
 ## Tests
 
-```
-uv run pytest
-```
-
-The parts in `examples/` are part of the suite, asserted against the dimensions and
-baselines their catalog cards recorded in Fusion. `tests/test_notch_fit.py` is the
-hanging interface: every channel floor on exact pitch, at full span, one per bracket and
-no more, for every shipped configuration. Its numbers are literals rather than imports
-from the part's own constants, because a fit test that reads the same constant the part
-built from agrees with the part however wrong the constant is.
-
-## The viewer is the configurator
-
-A part's parameters were always introspectable, so the sliders come from the signature
-and nothing else. The `stl` and `step` buttons build the part at whatever the sliders
-are holding, at full polish whatever the preview economy, and hand back the file: what
-is on screen is what lands in the slicer. Point somebody at your `nurb dev` and they
-can configure and download a part without touching Python.
+`uv run pytest`. The parts in `examples/` are the calibration set, asserted against dimensions from really-printed parts. Fit tests use literal numbers, never the part's own constants: a model's tests love to agree with its code.
 
 ## Not built yet
 
-- A hosted configurator. `nurb dev` already is one for anybody who can reach it, but
-  publishing without a running kernel is a different problem: MakerWorld's customizer
-  runs OpenSCAD, which build123d does not transpile to.
-- Measurement tools in the viewer. The section view shows an interior; it does not
-  yet measure it.
-- `min_wall` probes sample faces, so a pinch nothing lands near is still missed. A
-  clean result means "no thin walls found", not "no thin walls".
+- A hosted configurator. `nurb dev` already is one for anybody who can reach it, but publishing without a running kernel is a different problem.
+- Measurement tools in the viewer.
+- `min_wall` probes sample faces, so a pinch nothing lands near is still missed. A clean result means "no thin walls found", not "no thin walls".
 
 ## Debugging the viewer
 
-`window.__nurb` exposes `{ THREE, scene, camera, controls, mesh, ready }`.
-
-The URL takes `?part=<name>` to open a part, `?view=iso|front|back|left|right|top` to
-frame it deterministically, and `?bare` to hide the chrome. `nurb render` drives exactly
-that, and waits on `ready`.
-
-three.js is vendored in `src/nurb/vendor/three`, so the viewer needs no network. See the
-README beside it before changing versions: the import graph has grown since r169 and the
-files it added fail as a blank canvas rather than as an error.
+`window.__nurb` exposes `{ THREE, scene, camera, controls, mesh, ready }`. The URL takes `?part=<name>`, `?view=iso|front|back|left|right|top`, and `?bare`. three.js is vendored in `src/nurb/vendor/three`, so the viewer needs no network; see the README beside it before changing versions.
 
 ## License
 
-[FSL-1.1-MIT](LICENSE). Source-available for any purpose except building a competing
-product, and converts to plain MIT two years after each release.
+[FSL-1.1-MIT](LICENSE). Source-available for any purpose except building a competing product, and converts to plain MIT two years after each release.
 
 Copyright 2026 Ordinary Systems LLC.
 
 ### Third-party notices
 
-nurb uses **Open CASCADE Technology** (OCCT) for all B-rep geometry, reached through
-[build123d](https://github.com/gumyr/build123d) (Apache-2.0) and the `OCP` bindings
-(Apache-2.0). OCCT is licensed under
-[LGPL-2.1 with an additional exception](https://dev.opencascade.org/resources/licensing).
+nurb uses **Open CASCADE Technology** (OCCT) for all B-rep geometry, reached through [build123d](https://github.com/gumyr/build123d) (Apache-2.0) and the `OCP` bindings (Apache-2.0). OCCT is licensed under [LGPL-2.1 with an additional exception](https://dev.opencascade.org/resources/licensing). nurb does not redistribute OCCT; it is installed as a dependency and dynamically linked. Bundling nurb into a single-file distribution that embeds OCCT would require shipping the OCCT license and keeping the library replaceable, per LGPL.
 
-nurb does not redistribute OCCT. It is installed separately as a dependency, and
-dynamically linked at runtime. If you ever bundle nurb into a single-file
-distribution that embeds the OCCT binaries, ship a copy of the OCCT license with it
-and keep the library replaceable, per LGPL.
+nurb **does** redistribute [three.js](https://threejs.org) r169 (MIT), vendored so the viewer works offline, with its `LICENSE` beside it.
 
-nurb **does** redistribute [three.js](https://threejs.org) r169 (MIT), vendored in
-`src/nurb/vendor/three` so the viewer works without a network. Its `LICENSE` ships
-beside it and the `@license` header stays on the build file, which is what MIT asks for.
+Other dependencies: trimesh (MIT), watchdog (Apache-2.0), websockets (BSD-3-Clause), numpy (BSD-3-Clause). Optional, for `nurb render` only: playwright (Apache-2.0).
 
-Other dependencies: trimesh (MIT), watchdog (Apache-2.0), websockets (BSD-3-Clause),
-numpy (BSD-3-Clause). Optional, for `nurb render` only: playwright (Apache-2.0), which
-downloads its own browser build.
+npm note: nurb has no JavaScript to ship, so PyPI is the only install channel. [`@shpigford/nurb`](https://www.npmjs.com/package/@shpigford/nurb) just points `npx` users here.
