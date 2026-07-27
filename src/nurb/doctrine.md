@@ -13,11 +13,13 @@ ones that are specific to OCCT are marked as such and were measured, not reasone
 from nurb import *
 
 @part
-def dispenser(width=80, height=120, wall=2, draft=False):
+def dispenser(width=80.0, height=120.0, wall=2.0, draft=False):
     body = Box(width, height, wall)
-    if not draft:
-        body = chamfer(body.edges().filter_by(Axis.Z), length=1)
-    return body
+    if draft:
+        return body
+    bed = body.bounding_box().min.Z
+    keep = body.edges().filter_by(lambda e: e.bounding_box().min.Z > bed)
+    return polish(body, keep, 1.0)
 ```
 
 Keyword defaults are the parameters. That one declaration feeds the agent, the CLI, the
@@ -112,10 +114,17 @@ The polish pass runs last, after structure is finished.
 
 1. **Chamfers are the default on exposed edges**, 1mm, never below 0.8mm. A consistent
    faceted look that prints reliably beats a fillet default.
-2. **No chamfers on the back face or the bottom face, at all.** The back sits against
-   the wall and the bottom is the bed-contact face. Chamfering them buys nothing, and
-   where a bottom chamfer meets another one it makes sliver facets and notch points that
-   are very hard to print.
+2. **No chamfers lying in the back face or the bottom face.** The back sits against the
+   wall and the bottom is the bed-contact face. Chamfering an edge that lies in either
+   buys nothing, and where a bottom chamfer meets another one it makes sliver facets and
+   notch points that are very hard to print.
+   **An edge that merely ends there is fine**, and this is the distinction to get right,
+   because reading the rule as "nothing touching the bed" throws away the vertical corner
+   chamfers, which are the most-handled edges on the part. A vertical corner's chamfer
+   stands square to the plate and the first layer keeps its full width. A *sloped* edge
+   arriving at the plate is the case that is not fine: its chamfer lands tilted and lays
+   a knife edge into the first layer. That is exactly what `bed_bevel` measures, and it
+   tells a corbel from a chamfer by reach, since a chamfer's reach is its size.
 3. **Never touch fit-critical mating geometry**: channels, dovetails, sockets, anything
    that has to slide onto something else. Lead-in chamfers at a mating mouth sound
    helpful and are not. They make tiny compound facets that print badly on someone
@@ -130,7 +139,24 @@ The polish pass runs last, after structure is finished.
    complaint. It shipped in this library once.
 5. **Select chamfer edges by filtering, never blanket-chamfer.** Mating edges, back-face
    edges, bottom-face edges and concave edges all have to be excluded.
-6. **No text labels on parts.** File naming carries catalog identity.
+   **Filter for what must not be touched, then let the kernel refuse the rest.** A
+   chamfer call is all or nothing, so one edge that cannot land takes the whole pass
+   down, and the tempting response is to keep narrowing the set by hand until it builds.
+   That is how a part ends up with three chamfered edges out of ninety. Narrow the set
+   for reasons you can name, then chamfer greedily: try the set, and where it fails,
+   bisect and keep the halves that build. Refuse any batch that makes a face smaller
+   than the corner triangle three chamfers leave, about `0.866 * size ** 2`, since
+   anything smaller is chamfers colliding. Chamfer the original solid with the whole
+   accepted set each time, never the result of the last attempt: an edge belongs to the
+   shape it was selected from, and applying batches in sequence quietly re-chamfers the
+   first body and returns it.
+6. **No text labels on parts.** File naming carries catalog identity. There is a second
+   reason beyond taste: a glyph's outline comes from a system font, so a part with text
+   on it builds to different geometry on a different machine. The calibration coupon,
+   which needs a label because four of them come off one plate looking identical, comes
+   out at 2600.6mm3 with 88 faces on one machine and 2601.0 with 83 on another. Nothing
+   about its fit moves, but its card cannot be asserted anywhere but where it was
+   written.
 7. **Consistency is the polish.** One chamfer size across a family is what makes it read
    as a designed system rather than a pile of prints.
 
@@ -150,9 +176,23 @@ Specific to OCCT, and measured on real parts rather than reasoned about.
   with 1.66mm between the edges and builds with 2.16mm; at 0.5mm it builds with 1.16mm.
   The threshold tracks the chamfer exactly. This is the single most common way a part
   stops building.
+- **One chamfered edge needs more than `chamfer_size` of face**, which is the same rule
+  with one chamfer instead of two and is easy to miss because it looks like plenty of
+  room. It bites wherever a polished edge sits beside something that is never polished:
+  a concave junction, a structural chamfer's toe, a pocket wall. Measured on three
+  different parts, all at the same threshold: 1.08mm builds and 1.00mm fails at a 1mm
+  chamfer.
 - **A batch chamfer failure is not a bad edge.** Every edge in a failing set chamfers
   fine on its own, so testing them one at a time reports that nothing is wrong. Bisect
   the set pairwise instead. "Try a smaller length" would never have found the rule above.
+- **The second way a chamfer dies, where bisecting does not help**, is an edge whose end
+  lands on a vertex with four faces around it and only three edges between them. Two of
+  those faces touch at a point without sharing an edge, and OCCT has no cap for that
+  corner. The edge fails on its own, on a clean body, at every length down to 0.05mm, so
+  nothing about the failure looks like a clearance problem. The fix is to chamfer in two
+  passes so that the first one gives those two faces a real edge to meet along, then
+  reselect from the result. Found on the parts bin, where the front drop and the side
+  taper land at the same height by design.
 - **Prefer `new_edges` over geometric selectors.** Each chamfer changes topology, so a
   selector resolved against pristine geometry drifts once an earlier chamfer runs.
   `new_edges(before, combined=after)` returns exactly the edges an operation created. It
@@ -196,6 +236,25 @@ forward = [-1, 0, 0]
 sliver = 6
 ```
 
+### Variants
+
+A catalog entry that is the same function at different numbers is a variant, not a new
+file. It goes in the same fence, and `build`, `check`, `card` and `export` all walk it
+exactly as they walk the part's own defaults, so it gets its own STL, its own baselines
+and its own line in the AUTO block.
+
+```toml
+[variants.shelf_gridfinity_3x2.params]
+grid_x = 3
+bracket_count = 6
+
+[variants.shelf_gridfinity_3x2.accepted]
+sliver = 26
+```
+
+The test is whether it is the same geometry. A wider cradle on the same J is a variant.
+A different mechanism is a part, however similar the slab looks.
+
 ## Measurements
 
 The bottleneck on a one-off is not geometry, it is dimensions. A wrong number produces a
@@ -222,12 +281,23 @@ depth = measured("shelf_depth")
 An unknown name raises, naming what is on file. That failure is the point: it is the
 moment to ask rather than to pick something plausible.
 
+**When there is nobody to ask**, write the guess down and mark it `provisional = true`.
+The danger was never the guess, it is that a guess and a measurement look identical six
+months later. `how` is still required, because "eyeballed against a broom" tells the
+next person how far to trust it, and `nurb check` lists every provisional value until
+somebody picks up a caliper.
+
 A measured value pays for itself across a family. Notch measured one bracket pitch and
 amortized it over sixteen parts.
 
 ## Verification
 
-"It built" is not verification. Before presenting a part:
+"It built" is not verification. `nurb verify` runs the machine-checkable part of
+this list: one solid per configuration, every count flexed upward, the rules clean,
+and the card agreeing with the geometry. The two it cannot do are the two that need
+you, and they are items 2 and 6.
+
+Before presenting a part:
 
 1. **Flex the driving parameters up as well as down**, for example 4 to 6 to 2 to 4.
    Growth is what catches a frozen selector; shrinking alone passes a broken part.

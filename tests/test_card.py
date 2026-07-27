@@ -7,7 +7,7 @@ with the geometry and that regenerating it changes nothing unless the geometry m
 import pytest
 
 from nurb import card
-from nurb.checks import Context, from_card
+from nurb.checks import Context, configurations, from_card
 
 
 def write(tmp_path, body):
@@ -59,6 +59,70 @@ def test_the_real_cards_parse(tmp_path):
     parts = pathlib.Path(__file__).parents[1] / "examples" / "notch" / "parts"
     for part in sorted(parts.glob("*.py")):
         assert from_card(part).accepted.get("sliver") is not None, part.name
+
+
+# --- variants ----------------------------------------------------------------
+
+
+def test_a_part_with_no_variants_is_one_configuration(tmp_path):
+    part = write(tmp_path, "```toml\n[accepted]\nsliver = 2\n```\n")
+    name, overrides, ctx = configurations(part)[0]
+    assert (name, overrides, ctx.accepted) == ("thing", {}, {"sliver": 2})
+
+
+def test_a_variant_carries_overrides_and_its_own_baseline(tmp_path):
+    """A catalog entry is a name, some overrides and its own baselines. Nothing else."""
+    part = write(
+        tmp_path,
+        "```toml\n"
+        "[part]\nmin_wall = 1.0\n\n"
+        "[accepted]\nsliver = 18\n\n"
+        "[variants.wide.params]\ngrid_x = 3\nbracket_count = 6\n\n"
+        "[variants.wide.accepted]\nsliver = 26\n"
+        "```\n",
+    )
+    base, wide = configurations(part)
+    assert base[:2] == ("thing", {})
+    assert wide[0] == "wide"
+    assert wide[1] == {"grid_x": 3, "bracket_count": 6}
+    assert wide[2].accepted == {"sliver": 26}
+    assert wide[2].min_wall == 1.0  # the part's own settings carry into its variants
+    assert base[2].accepted == {"sliver": 18}  # and the base is not contaminated
+
+
+def test_a_variant_that_forgets_params_is_an_error_not_a_shrug(tmp_path):
+    """`[variants.wide] grid_x = 3` looks right and silently overrides nothing."""
+    part = write(tmp_path, "```toml\n[variants.wide]\ngrid_x = 3\n```\n")
+    with pytest.raises(ValueError, match=r"variants.wide.params"):
+        configurations(part)
+
+
+def test_the_block_records_every_shipped_configuration():
+    """A card describing only the defaults leaves most of a family unrecorded."""
+    import pathlib
+
+    from nurb import builder, checks
+
+    part = pathlib.Path(__file__).parents[1] / "examples" / "notch" / "parts" / "hook_scissors.py"
+    built = []
+    for name, overrides, ctx in configurations(part):
+        shape, _, _ = builder.build(part, overrides=overrides or None)
+        built.append((name, shape, ctx, checks.run(shape, ctx)))
+    lines = card.facts(built[0][1], built[0][2], built[0][3], variants=built[1:])
+    assert [line for line in lines if line.startswith("Variant hook_utility:")]
+    assert [line for line in lines if line.startswith("Variant hook_utility_long:")]
+
+
+def test_a_variant_line_records_disconnected_solids():
+    """A variant must not say `clean` while hiding a broken one-solid contract."""
+    from build123d import Box, Pos
+
+    base = Box(10, 10, 10)
+    split = base + Pos(20, 0, 0) * Box(10, 10, 10)
+    ctx = Context()
+    line = card.facts(base, ctx, [], variants=[("split", split, ctx, [])])[-1]
+    assert "2 solids" in line
+    assert "2000.0 mm3" in line
 
 
 # --- the AUTO block ----------------------------------------------------------
@@ -150,8 +214,14 @@ def test_the_verdict_reads_as_a_summary():
 def test_the_real_cards_are_current():
     """A stale AUTO block is a card disagreeing with its own part.
 
-    This is the test that makes `nurb card` worth running: it builds all three example
-    parts and asserts the blocks already on disk are what the geometry produces now.
+    This is the test that makes `nurb card` worth running: it builds every example part
+    and asserts the blocks already on disk are what the geometry produces now.
+
+    A part that renders text is skipped, because its glyph outlines come from a system
+    font and so its volume, face count and sliver count are that machine's rather than
+    the part's. The calibration coupon is the only one, and it measures 2600.6mm3 with
+    88 faces here against 2601.0 and 83 on CI. The doctrine's "no text labels on parts"
+    rule now has a second reason behind it: text is not reproducible.
     """
     import pathlib
 
@@ -159,7 +229,12 @@ def test_the_real_cards_are_current():
 
     parts = pathlib.Path(__file__).parents[1] / "examples" / "notch" / "parts"
     for part in sorted(parts.glob("*.py")):
-        shape, _, _ = builder.build(part, draft=False)
-        ctx = checks.from_card(part)
-        want = card.render(card.facts(shape, ctx, checks.run(shape, ctx)))
+        if "Text(" in part.read_text(encoding="utf-8"):
+            continue
+        built = []
+        for name, overrides, ctx in checks.configurations(part):
+            shape, _, _ = builder.build(part, overrides=overrides or None, draft=False)
+            built.append((name, shape, ctx, checks.run(shape, ctx)))
+        _, shape, ctx, found = built[0]
+        want = card.render(card.facts(shape, ctx, found, variants=built[1:]))
         assert want in part.with_suffix(".md").read_text(), f"{part.stem}: run nurb card"
