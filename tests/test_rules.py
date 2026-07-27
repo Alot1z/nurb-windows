@@ -157,11 +157,42 @@ def test_bed_bevel_catches_a_chamfer_on_the_first_layer():
     assert len(only(bottom, "bed_bevel")) == 4
 
 
+def test_bed_bevel_catches_a_circular_chamfer_on_the_first_layer():
+    """The band is 1mm deep even though its plan-view bounding box is 20mm wide."""
+    from build123d import chamfer
+
+    cylinder = Cylinder(10, 20)
+    bed = cylinder.bounding_box().min.Z
+    bottom = [
+        edge
+        for edge in cylinder.edges()
+        if abs(edge.bounding_box().min.Z - bed) < 1e-6
+        and abs(edge.bounding_box().max.Z - bed) < 1e-6
+    ]
+    assert len(only(chamfer(bottom, 1), "bed_bevel")) == 1
+
+
 def test_bed_bevel_ignores_a_chamfer_anywhere_else():
     from build123d import Axis, chamfer
 
     box = Box(20, 20, 20)
     assert only(chamfer(box.edges().group_by(Axis.Z)[-1], 2), "bed_bevel") == []
+
+
+def test_bed_bevel_leaves_a_corbel_landing_on_the_plate_alone():
+    """The doctrine's own 45 degree underside is not polish, however tilted it is.
+
+    Rise is what separates them, and a bottom chamfer rises by its size exactly: 1, 2
+    and 3mm, against 10mm for this corbel. Unlike plan-view reach, rise also works for a
+    chamfer following a circular or diagonal edge.
+    """
+    body = Pos(0, 0, 10) * Box(20, 20, 20)  # standing on the plate at z=0
+    wedge = Plane.XZ * Polygon((10, 0), (10, 10), (0, 0), align=None)
+    post = body - extrude(wedge, 30, both=True)  # a 45 degree underside reaching 10mm
+    assert only(post, "bed_bevel") == []
+    # The same face against a part whose polish is 4mm, where 10mm of rise is back
+    # inside chamfer territory. The rule is about scale, so it has to move with it.
+    assert len(only(post, "bed_bevel", Context(cosmetic_chamfer=4.0))) == 1
 
 
 def test_concave_cosmetic_catches_polish_in_an_inside_corner():
@@ -172,6 +203,22 @@ def test_concave_cosmetic_catches_polish_in_an_inside_corner():
              if abs(e.center().X - 1) < 1e-6 and abs(e.center().Z - 1) < 1e-6]
     assert len(inner) == 1
     assert len(only(chamfer(inner, 1), "concave_cosmetic")) == 1
+
+
+def test_concave_cosmetic_leaves_a_deliberate_structural_chamfer_alone():
+    """The 2mm relief the doctrine prescribes for thin material is not polish.
+
+    Same corner, same rule, twice the chamfer. This fired six times at
+    `mount_tape_measure` and again at `mount_akrobin_rail`, at the exact geometry the
+    rule's own message tells you to use, because the limit was twice the strip a polish
+    chamfer leaves rather than about equal to it. Both parts print.
+    """
+    from build123d import chamfer
+
+    shape = Box(20, 20, 20) - Pos(6, 0, 6) * Box(10, 30, 10)
+    inner = [e for e in shape.edges()
+             if abs(e.center().X - 1) < 1e-6 and abs(e.center().Z - 1) < 1e-6]
+    assert only(chamfer(inner, 2), "concave_cosmetic") == []
 
 
 def test_concave_cosmetic_ignores_polish_on_an_outside_corner():

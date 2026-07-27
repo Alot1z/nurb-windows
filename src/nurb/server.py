@@ -5,6 +5,7 @@ One port serves both the viewer and the websocket.
 """
 
 import asyncio
+import collections
 import json
 import pathlib
 import secrets
@@ -146,7 +147,7 @@ class Server:
         if path == "/":
             return self._resp(200, VIEWER.read_bytes(), "text/html; charset=utf-8")
         if path == "/api/parts":
-            body = json.dumps([self._meta(e) for e in self.state.values()]).encode()
+            body = json.dumps([self._wire(e) for e in self.state.values()]).encode()
             return self._resp(200, body, "application/json")
         if path.startswith("/vendor/"):
             # three.js, shipped in the package. A CAD tool that needs a CDN is broken
@@ -179,13 +180,49 @@ class Server:
     def _meta(entry):
         return {k: v for k, v in entry.items() if k not in ("glb", "shape")}
 
+    def _family(self):
+        """Parameters most of this project's parts declare identically.
+
+        A family constant rather than one part's dimension. Notch writes
+        `chamfer_size=1.0` in twelve of thirteen parts, and changing it in one of them
+        does not adjust that part, it makes it disagree with the other twelve. That is a
+        different kind of edit from moving a shelf's depth, and the panel says so.
+
+        Inferred, not declared, for the same reason `nurb extract` infers: what a family
+        shares is discovered once the parts exist. Both the name and the default have to
+        match, so `bracket_count`, which every part declares and each at its own value,
+        is correctly not one of these.
+
+        Read off what has already been built, so it costs nothing per rebuild and needs
+        no second place to keep in sync.
+        """
+        built = [e for e in self.state.values() if e.get("params")]
+        if len(built) < 3:  # too few to tell a family constant from a coincidence
+            return set()
+        seen = collections.Counter(
+            (p["name"], repr(p["default"])) for e in built for p in e["params"]
+        )
+        return {name for (name, _), n in seen.items() if n > len(built) / 2}
+
+    def _wire(self, entry):
+        """`_meta`, with each parameter told whether the whole family shares it."""
+        out = self._meta(entry)
+        if out.get("params"):
+            family = self._family()
+            out["params"] = [{**p, "family": p["name"] in family} for p in out["params"]]
+        return out
+
     # ---------- websocket ----------
 
     async def ws(self, connection):
         self.clients.add(connection)
         try:
             payload = json.dumps(
-                {"type": "sync", "parts": [self._meta(e) for e in self.state.values()]}
+                {
+                    "type": "sync",
+                    "project": self.root.name,
+                    "parts": [self._wire(e) for e in self.state.values()],
+                }
             )
             await connection.send(payload)
             async for raw in connection:
@@ -265,7 +302,7 @@ class Server:
                 self.clients.discard(client)
 
     async def broadcast(self, entry, kind="rebuilt"):
-        await self.send({"type": kind, **self._meta(entry)})
+        await self.send({"type": kind, **self._wire(entry)})
 
     # ---------- watching ----------
 
@@ -310,6 +347,14 @@ class Server:
                 paths.add(self.queue.get_nowait())  # collect, don't discard:
             for path in sorted(paths):              # two parts can change at once
                 if not pathlib.Path(path).exists():
+                    # Deleted, or renamed away. Dropping it is the whole handling: a
+                    # part that is gone from disk but still in the list is one you can
+                    # select, drag sliders on, and export, none of which exist.
+                    name = pathlib.Path(path).stem
+                    if self.state.pop(name, None) is not None:
+                        self.overrides.pop(name, None)
+                        print(f"  {name}: gone", flush=True)
+                        await self.send({"type": "gone", "name": name})
                     continue
                 entry = await asyncio.to_thread(self.rebuild, path)
                 status = entry["error"] or f"{entry['ms']}ms"

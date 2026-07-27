@@ -6,6 +6,7 @@ nothing in nurb does either.
 """
 
 import asyncio
+import contextlib
 import json
 import pathlib
 
@@ -176,6 +177,62 @@ def test_an_override_left_on_a_parameter_an_edit_removed_is_dropped(project, par
 def test_the_payload_the_browser_receives_carries_the_parameters(project, part_file):
     server = Server(project)
     entry = server.rebuild(part_file)
-    meta = json.loads(json.dumps(server._meta(entry)))
+    meta = json.loads(json.dumps(server._wire(entry)))
     assert [r["name"] for r in meta["params"]] == ["count", "height", "label"]
     assert "shape" not in meta and "glb" not in meta
+
+
+def test_one_part_has_no_family_to_share_anything_with(project, part_file):
+    """A constant is only a family constant once there is a family. Two parts agreeing
+    is a coincidence; the panel should not start folding things away on the strength of
+    it, and a project with one part has nothing to compare against at all."""
+    server = Server(project)
+    server.rebuild(part_file)
+    meta = server._wire(server.state[part_file.stem])
+    assert all(not r["family"] for r in meta["params"])
+
+
+def test_what_most_parts_declare_identically_is_a_family_constant(project, part_file):
+    """Name and default both have to match, which is what keeps a per-part count out."""
+    source = part_file.read_text()
+    for name, count in (("second", 9), ("third", 10), ("fourth", 11)):
+        (part_file.parent / f"{name}.py").write_text(
+            source.replace("thing(", f"{name}(").replace("count=4", f"count={count}")
+        )
+    server = Server(project)
+    for path in sorted(part_file.parent.glob("*.py")):
+        server.rebuild(path)
+    family = {
+        r["name"]
+        for r in server._wire(server.state["second"])["params"]
+        if r["family"]
+    }
+    assert "height" in family  # same default in all four
+    assert "count" not in family  # 2 in one part and 9 in three
+
+
+def test_a_deleted_part_is_forgotten_rather_than_left_in_the_list(project, part_file):
+    """Through the drain, which is what the watcher actually calls.
+
+    A part that is gone from disk but still listed is one you can select, drag sliders
+    on and export, none of which exist. It used to sit there until the server restarted.
+    """
+    server = Server(project)
+    server.rebuild(part_file)
+    server.overrides["thing"] = {"count": 9}
+    assert "thing" in server.state
+
+    sent = []
+
+    async def go():
+        server.queue = asyncio.Queue()
+        server.send = lambda payload: sent.append(payload) or asyncio.sleep(0)
+        part_file.unlink()
+        server.queue.put_nowait(str(part_file))
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(server.drain(), timeout=1.0)
+
+    asyncio.run(go())
+    assert "thing" not in server.state
+    assert "thing" not in server.overrides  # the sliders go with it
+    assert {"type": "gone", "name": "thing"} in sent

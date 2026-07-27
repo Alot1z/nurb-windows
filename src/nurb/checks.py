@@ -8,7 +8,7 @@ see each other, and `run` gathers them.
 """
 
 import pathlib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from math import asin, degrees
 
 from build123d import Axis, CenterOf, GeomType, Vector
@@ -354,6 +354,37 @@ def stability(shape, ctx):
 CARD_SETTINGS = "toml"  # the fence a card uses to carry them
 
 
+def settings(part_path):
+    """The card's settings block, parsed. An empty dict when there is none."""
+    import tomllib
+
+    card = pathlib.Path(part_path).with_suffix(".md")
+    if not card.is_file():
+        return {}
+    text = card.read_text(encoding="utf-8")  # cards say mm², so never the locale default
+    opening = f"```{CARD_SETTINGS}"
+    if opening not in text:
+        return {}
+    block = text.split(opening, 1)[1].split("```", 1)[0]
+    try:
+        return tomllib.loads(block)
+    except tomllib.TOMLDecodeError as exc:
+        raise ValueError(f"{card.name}: settings block is not valid TOML ({exc})") from exc
+
+
+def _apply(ctx, block, where):
+    ctx.accepted = {**ctx.accepted, **block.get("accepted", {})}
+    tunables = {**block.get("printer", {}), **block.get("part", {})}
+    for field_name, value in tunables.items():
+        if not hasattr(ctx, field_name):
+            raise ValueError(
+                f"{where}: no printer setting called {field_name!r}. "
+                f"have: {', '.join(sorted(vars(Context())))}"
+            )
+        setattr(ctx, field_name, tuple(value) if isinstance(value, list) else value)
+    return ctx
+
+
 def from_card(part_path, base=None):
     """Read a part's check settings out of its card.
 
@@ -364,31 +395,41 @@ def from_card(part_path, base=None):
 
     A card with no settings block is normal and means no findings are excused.
     """
-    import tomllib
-
-    ctx = base or Context()
     card = pathlib.Path(part_path).with_suffix(".md")
-    if not card.is_file():
-        return ctx
-    text = card.read_text(encoding="utf-8")  # cards say mm², so never the locale default
-    opening = f"```{CARD_SETTINGS}"
-    if opening not in text:
-        return ctx
-    block = text.split(opening, 1)[1].split("```", 1)[0]
-    try:
-        settings = tomllib.loads(block)
-    except tomllib.TOMLDecodeError as exc:
-        raise ValueError(f"{card.name}: settings block is not valid TOML ({exc})") from exc
-    ctx.accepted = {**ctx.accepted, **settings.get("accepted", {})}
-    tunables = {**settings.get("printer", {}), **settings.get("part", {})}
-    for field_name, value in tunables.items():
-        if not hasattr(ctx, field_name):
+    return _apply(base or Context(), settings(part_path), card.name)
+
+
+def configurations(part_path, base=None):
+    """Every configuration a part ships, as (name, overrides, ctx).
+
+    The first is always the part itself at its declared defaults. The rest come from
+    `[variants.<name>]` blocks in the card, each carrying the overrides that make it
+    and whatever it has justified on its own.
+
+    Variants exist because four Notch catalog entries are one part flexed, not new
+    geometry: the utility hooks are the scissors hook with a wider cradle, and two of
+    the three gridfinity shelves are the archetype at another grid size. Copying the
+    function into a file per catalog entry would put the same geometry in four places
+    and let them drift. A variant is a name, some overrides, and its own baselines,
+    which is all a catalog entry ever was.
+    """
+    stem = pathlib.Path(part_path).stem
+    card = pathlib.Path(part_path).with_suffix(".md")
+    block = settings(part_path)
+
+    def fresh():
+        return _apply(replace(base) if base else Context(), block, card.name)
+
+    out = [(stem, {}, fresh())]
+    for name, variant in block.get("variants", {}).items():
+        extra = set(variant) - {"params", "accepted", "part", "printer"}
+        if extra:
             raise ValueError(
-                f"{card.name}: no printer setting called {field_name!r}. "
-                f"have: {', '.join(sorted(vars(Context())))}"
+                f"{card.name}: variant {name} has {', '.join(sorted(extra))} at the top "
+                f"level. Parameter overrides go under [variants.{name}.params]."
             )
-        setattr(ctx, field_name, tuple(value) if isinstance(value, list) else value)
-    return ctx
+        out.append((name, dict(variant.get("params", {})), _apply(fresh(), variant, card.name)))
+    return out
 
 
 def projection(shape, ctx):
@@ -440,15 +481,30 @@ def bed_bevel(shape, ctx):
 
     A chamfer down there buys nothing and costs a mess: it turns the first layer into
     a knife edge that squashes, and on a mount-facing part it stops the thing sitting
-    flat. Nothing has to identify a chamfer to find one, because a face touching the
-    bed that is neither flat on it nor square to it can only be a bevel.
+    flat.
+
+    A tilted face touching the bed is not always a bevel, which this rule assumed and
+    the calipers holder disproved. The doctrine's corbel is a 45 degree underside, and
+    where it lands on the plate rather than dying into the body it is exactly such a
+    face: structure, prescribed, and 46mm2 of it.
+
+    What separates them is how far the face rises off the bed, and a bottom chamfer's
+    rise is its size exactly. Measured: 1.00, 2.00 and 3.00mm for chamfers of those
+    sizes, against 4.29mm for the corbel. Rise is independent of the edge's path: a 1mm
+    chamfer around a 20mm cylinder is still 1mm high even though its plan-view bounding
+    box is 20mm in both directions. The limit is three times the polish size because the
+    largest chamfer this doctrine puts anywhere is the 3mm structural relief, and the
+    smallest corbel starts with a 4 to 6mm vertical tip.
     """
     up = Vector(*ctx.up).normalized()
     bed, _ = _span(shape, up)
     found = []
     for face in shape.faces():
-        if _span(face, up)[0] > bed + 1e-4:
+        low, high = _span(face, up)
+        if low > bed + 1e-4:
             continue  # does not reach the plate
+        if high - low > 3 * ctx.cosmetic_chamfer:
+            continue  # rises too far to be a chamfer band, so it is structure
         for normal in _sample_normals(face):
             tilt = abs(normal.dot(up))
             if 0.03 < tilt < 0.97:  # neither lying on the plate nor standing on it
@@ -480,9 +536,25 @@ def concave_cosmetic(shape, ctx):
     the polish pass makes, whose long edges are all concave, is one. Width comes from
     area over perimeter, which is the honest measure for a strip and does not care how
     the strip is oriented.
+
+    **About as wide as the polish pass makes, not merely narrow.** A chamfer of length s
+    across a right-angled corner leaves a strip s * sqrt(2) wide, so the window is that
+    figure with a little headroom, and the limit was twice it until two parts showed
+    what twice costs. A 2mm structural chamfer, which is what the doctrine prescribes
+    for a concave junction in thin material, leaves a 2.6mm strip; the 2mm of wall left
+    standing between two of them measures 1.9mm. Both sat under a 2.8mm limit, so the
+    rule fired six times at `mount_tape_measure` and again at `mount_akrobin_rail`, at
+    the exact geometry its own message tells you to use. A deliberate relief is bigger
+    than polish, and being bigger is the only thing that distinguishes it.
+
+    The cost is a polish chamfer in a shallow concave junction, past about 105 degrees,
+    where the strip a 1mm chamfer leaves is wide enough to read as deliberate. That is
+    the right way round to be wrong: `polish_edges` vetoes concave edges outright, so
+    this rule is the backstop for a part that rolls its own selector, and a backstop
+    that cries wolf at correct geometry gets switched off.
     """
     neighbours = edge_faces(shape)
-    limit = 2 * ctx.cosmetic_chamfer * 1.42
+    limit = ctx.cosmetic_chamfer * 1.42 * 1.15
     found = []
     for face in shape.faces():
         if face.geom_type != GeomType.PLANE:
@@ -591,9 +663,13 @@ def min_wall(shape, ctx):
             near = min(reach)
             if thinnest is None or near < thinnest:
                 thinnest, spot = near, point
-    # Slack, because a card declaring the value it measured should not then fail on
-    # the last bit of a float.
-    if thinnest is None or thinnest >= ctx.min_wall - 1e-3:
+    # Slack, because a card declaring the value it measured should not then fail on the
+    # last bit of a float. One percent rather than a micron: the same solid measures
+    # 0.500 against one OCCT build and 0.498 against another, and a threshold tight
+    # enough to see that turns a card into a claim about which machine wrote it. A card
+    # can also set `min_wall = 0` to say the rule cannot measure this part at all, which
+    # is honest for anything whose thinnest apparent section is not a wall.
+    if thinnest is None or thinnest >= ctx.min_wall * 0.99 - 1e-3:
         return []
     return [
         Finding(
