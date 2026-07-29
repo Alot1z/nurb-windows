@@ -180,6 +180,11 @@ class Server:
             entry["ms"] = round(ms, 1)
             entry["error"] = None
             entry["shape"] = shape  # kept for the check pass, never serialized
+            scene = getattr(shape, "_nurb_scene", None)
+            if scene is not None:
+                from .assembly import wire
+
+                entry["joints"] = wire(scene)
         except Exception as exc:
             entry["glb"] = None
             entry["shape"] = None
@@ -566,6 +571,29 @@ class Server:
         self.observer.daemon = True
         self.observer.start()
 
+    def _dependents(self, paths):
+        """Assemblies whose use() placed any of these files.
+
+        Editing a part while watching the assembly it sits in is the whole editing
+        loop for an assembly, and without this the scene on screen would be the one
+        part stale. Read off the scenes already built, so it costs nothing and there
+        is no dependency file to keep in sync. Fixpoint, not one pass: an assembly
+        can place an assembly.
+        """
+        found = set(paths)
+        grew = True
+        while grew:
+            grew = False
+            for entry in self.state.values():
+                scene = getattr(entry.get("shape"), "_nurb_scene", None)
+                if scene is None:
+                    continue
+                mine = str(self.root / "parts" / f"{entry['name']}.py")
+                if mine not in found and any(u in found for u in scene.uses):
+                    found.add(mine)
+                    grew = True
+        return found - set(paths)
+
     async def drain(self):
         """Rebuild on file change, coalescing the burst an editor save produces."""
         while True:
@@ -573,6 +601,7 @@ class Server:
             await asyncio.sleep(0.05)
             while not self.queue.empty():
                 paths.add(self.queue.get_nowait())  # collect, don't discard:
+            paths |= self._dependents(paths)
             for path in sorted(paths):              # two parts can change at once
                 if not pathlib.Path(path).exists():
                     # Deleted, or renamed away. Dropping it is the whole handling: a
