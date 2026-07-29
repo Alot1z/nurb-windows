@@ -201,6 +201,53 @@ def test_the_watcher_learns_dependents_from_the_scenes_already_built(project):
     assert srv._dependents({str(path)}) == set()  # nothing uses the assembly
 
 
+def test_export_of_an_assembly_writes_its_placed_parts_and_never_the_weld(project, monkeypatch, capsys):
+    """A merged scene is a weld, and its obstacles were never going to be printed.
+    Named explicitly, an assembly exports the parts it places; a project sweep
+    skips it because those parts already export as themselves."""
+    import argparse
+
+    from nurb import cli
+
+    write(project, "plate", PLATE)
+    write(project, "carrier", USE_ASM)
+    monkeypatch.chdir(project)
+
+    cli.cmd_export(argparse.Namespace(part="carrier", formats=["stl"]))
+    assert (project / "build" / "plate.stl").exists()
+    assert not (project / "build" / "carrier.stl").exists()
+    assert "exporting the 1 part(s) it places" in capsys.readouterr().out
+
+    (project / "build" / "plate.stl").unlink()
+    cli.cmd_export(argparse.Namespace(part=None, formats=["stl"]))
+    assert (project / "build" / "plate.stl").exists()
+    assert not (project / "build" / "carrier.stl").exists()
+    assert "skipped" in capsys.readouterr().out
+
+
+def test_the_viewer_export_route_zips_an_assemblys_placed_parts(project):
+    """One download: separate files die silently on the browser's
+    multiple-download permission, and the merged scene is a weld."""
+    import io
+    import zipfile
+
+    from nurb.server import Server
+
+    write(project, "plate", PLATE)
+    write(project, "carrier", USE_ASM)
+    srv = Server.__new__(Server)
+    srv.root = project
+    srv.overrides = {}
+
+    body, attach, mime = srv._export("carrier", "stl")
+    assert (attach, mime) == ("carrier-stl.zip", "application/zip")
+    assert zipfile.ZipFile(io.BytesIO(body)).namelist() == ["plate.stl"]
+
+    body, attach, mime = srv._export("plate", "stl")
+    assert (attach, mime) == ("plate.stl", "model/stl")
+    assert body[:80]  # a real file, not a wrapper
+
+
 def test_an_assembly_glb_keeps_its_movers_as_named_nodes(project):
     """The node names are the viewer's contract for posing a joint client-side."""
     import io
