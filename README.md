@@ -2,6 +2,8 @@
 
 Agentic CAD for 3D printing. The user is a language model: your agent writes parts as Python functions, nurb builds them into real solids, checks them against print physics, and shows you the result live. You judge, drag sliders, download the STL.
 
+<img width="2062" height="1232" alt="Viewer" src="https://github.com/user-attachments/assets/77c7c392-3454-42a0-aaf6-159b81e7dcff" />
+
 ## Install
 
 ```bash
