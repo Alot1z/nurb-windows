@@ -15,7 +15,9 @@ import getpass
 import json
 import pathlib
 import re
+import secrets
 import shutil
+import subprocess
 import sys
 import tomllib
 
@@ -116,6 +118,12 @@ def main():
     ap.add_argument("--tasks", default=",".join(TASKS), help="comma-separated, default all")
     ap.add_argument("--seed", type=int, default=SEED)
     ap.add_argument("--timeout", type=float, default=3600.0)
+    ap.add_argument(
+        "--pr",
+        choices=("ask", "yes", "no"),
+        default="ask",
+        help="open the pull request automatically (default: ask)",
+    )
     args = ap.parse_args()
 
     print("\nnurb benchmark contribution\n———————————————————————————")
@@ -161,8 +169,14 @@ def main():
     )
 
     tasks = [t.strip() for t in args.tasks.split(",") if t.strip()]
+    # Every run gets its own directory, branch, and PR: the same person running the
+    # same combo ten times, or in three sessions at once, produces ten independent
+    # pure-addition PRs that merge in any order with zero conflicts. Matching rows
+    # pool by identity no matter which directory they arrive in.
+    run_id = secrets.token_hex(3)
     label = f"{name}-{model}-{effort}"
-    out = EVALS / "results" / label
+    run_name = f"{label}-{run_id}"
+    out = EVALS / "results" / run_name
     out.mkdir(parents=True, exist_ok=True)
     minutes = len(tasks) * args.trials * 8
     print(
@@ -186,13 +200,13 @@ def main():
                 sink.flush()
                 note = f"  ({row['error']})" if row["error"] else ""
                 print(f"[{task} trial {n}] score {row['score']:.3f}{note}", flush=True)
-                staged.append(stage_submission(out, label, task, n))
+                staged.append(stage_submission(out, run_name, task, n))
 
     # The staged submission needs the matching rows; sanitize the whole file so a
     # custom --out or odd path never leaks through a row's error string.
     pairs = replacements(out)
     rows_text = (out / "results.jsonl").read_text(encoding="utf-8")
-    sub = EVALS / "submissions" / label
+    sub = EVALS / "submissions" / run_name
     (sub / "results.jsonl").write_text(sanitize(rows_text, pairs), encoding="utf-8")
 
     leak = re.compile(re.escape(str(pathlib.Path.home())) + r"|" + re.escape(getpass.getuser()))
@@ -204,37 +218,109 @@ def main():
     if dirty:
         sys.exit(f"sanitizer missed something in {dirty[0]}; please open an issue instead of a PR")
 
-    # The published page regenerates here, not as a step the contributor has to
-    # remember: the submission ships with the benchmarks.html it produces, so the
-    # stale-page test passes on the PR as opened.
-    from . import report as report_module
-    from . import site as site_module
-
-    paths = sorted(
-        str(p) for p in (EVALS / "submissions").iterdir() if (p / "results.jsonl").is_file()
-    )
-    site_module.SITE.write_text(
-        site_module.render(site_module.summarize(site_module.rows_from(paths))),
-        encoding="utf-8",
-    )
-    report_module.write(EVALS / "submissions", EVALS / "REPORT.md")
-
-    # First dogfooding run went wrong two ways this text now prevents: the commit
-    # commands ran in a different nurb checkout than the clone the wizard staged
-    # into, and the fork step failed for someone with push access. Absolute paths,
-    # and both routes.
+    # The submission is deliberately a pure addition: one new directory, nothing
+    # shared touched. REPORT.md and the page regenerate on main after merge (the
+    # leaderboard workflow), so any number of open submission PRs merge in any
+    # order without a conflict.
     repo = EVALS.parent
+    print(f"\nDone. Staged in this checkout ({repo}):\n  {sub}\n")
+
+    # Handing a contributor five git commands is where two dogfooding runs died
+    # (wrong checkout, stale branch, accidental nested-repo add). The wizard owns
+    # the whole submission: it knows the right checkout because it is standing in it.
+    want = args.pr
+    if want == "ask":
+        if _gh_ready(repo):
+            try:
+                raw = input("Open the pull request now? [Y/n]: ").strip().lower()
+                want = "no" if raw in ("n", "no") else "yes"
+            except EOFError:
+                want = "no"
+        else:
+            print("GitHub CLI (gh) not found or not signed in; printing the manual steps.")
+            want = "no"
+    if want == "yes":
+        url, problem = open_pr(run_name, repo)
+        if url:
+            print(
+                f"\nSubmitted: {url}\n\n"
+                f"Every run counts, including a single one: matching rows pool on the "
+                f"leaderboard, and a bad score is data, not an embarrassment. Run it "
+                f"again whenever you like; every run is its own PR."
+            )
+            return
+        print(f"\nCould not open the PR automatically ({problem}); the manual steps:")
+    _manual_steps(run_name, repo)
+
+
+def _gh_ready(repo):
+    if not shutil.which("gh"):
+        return False
+    return _run(["gh", "auth", "status"], repo).returncode == 0
+
+
+def _run(cmd, cwd):
+    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+
+
+def _tail(done):
+    text = (done.stderr or done.stdout or "").strip()
+    return text.splitlines()[-1] if text else f"exit {done.returncode}"
+
+
+def open_pr(run_name, repo):
+    """Branch, commit, push, and open the PR from the wizard's own checkout,
+    forking first only when push access is missing. The branch is unique per run
+    and carries only this run's directory, branched from origin's main, so any
+    number of runs from any number of sessions produce independent PRs that merge
+    in any order. Returns (url, None) or (None, what went wrong)."""
+    branch = f"bench-{run_name}"
+    base = ["-b", branch]
+    if _run(["git", "fetch", "origin", "main"], repo).returncode == 0:
+        base += ["FETCH_HEAD"]
+    done = _run(["git", "checkout", *base], repo)
+    if done.returncode != 0:
+        return None, f"git checkout: {_tail(done)}"
+
+    _run(["git", "add", f"evals/submissions/{run_name}"], repo)
+    done = _run(["git", "commit", "-m", f"benchmark run: {run_name}"], repo)
+    if done.returncode != 0:
+        return None, f"git commit: {_tail(done)}"
+
+    push = _run(["git", "push", "-u", "origin", branch], repo)
+    if push.returncode != 0:
+        fork = _run(["gh", "repo", "fork", "--remote", "--remote-name", "fork"], repo)
+        if fork.returncode != 0:
+            return None, f"gh repo fork: {_tail(fork)}"
+        push = _run(["git", "push", "-u", "fork", branch], repo)
+        if push.returncode != 0:
+            return None, f"git push: {_tail(push)}"
+
+    done = _run(
+        [
+            "gh", "pr", "create",
+            "--title", f"benchmark run: {run_name}",
+            "--body",
+            "Automated submission from the contribute wizard: one run, one new "
+            "directory, nothing shared touched. Matching rows pool on the "
+            "leaderboard, and the report and page regenerate on main after merge.",
+        ],
+        repo,
+    )
+    if done.returncode != 0:
+        return None, f"gh pr create: {_tail(done)}"
+    return done.stdout.strip().splitlines()[-1], None
+
+
+def _manual_steps(run_name, repo):
     print(
-        f"\nDone. Staged in THIS checkout ({repo}):\n"
-        f"  {sub}\n"
-        f"  {site_module.SITE}  (the regenerated leaderboard page)\n"
-        f"  {EVALS / 'REPORT.md'}  (the regenerated report)\n\n"
-        f"To put it on the leaderboard, from {repo}:\n"
-        f"  git checkout -b bench-{label}\n"
-        f"  git add evals/submissions evals/REPORT.md site/benchmarks.html\n"
-        f"  git commit -m 'benchmark row: {label}'\n"
-        f"  gh repo fork Shpigford/nurb --clone=false   # skip if you have push access\n"
-        f"  gh pr create --title 'benchmark row: {label}' --fill\n\n"
+        f"\nFrom {repo}:\n"
+        f"  git checkout -b bench-{run_name}\n"
+        f"  git add evals/submissions/{run_name}\n"
+        f"  git commit -m 'benchmark run: {run_name}'\n"
+        f"  gh repo fork Shpigford/nurb --remote   # skip if you have push access\n"
+        f"  git push -u origin bench-{run_name}\n"
+        f"  gh pr create --title 'benchmark run: {run_name}' --fill\n\n"
         f"Every run counts, including a single one: matching rows pool on the "
         f"leaderboard, and a bad score is data, not an embarrassment."
     )
