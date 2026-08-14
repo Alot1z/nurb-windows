@@ -375,14 +375,16 @@ class Server:
                 return variant_ctx
         return ctx
 
-    def check(self, path):
+    def check(self, path, stop=None):
         """Run the rules on the last good build.
 
         Separate from `rebuild` and broadcast separately, because checking the shelf
         costs about as much again as building it. Geometry should land at the speed it
-        always did and the findings can arrive a beat later.
+        always did and the findings can arrive a beat later. `stop` reaches the motion
+        sweep, the one check that can hold the build lock for seconds.
         """
         from . import checks
+        from .assembly import Interrupted
 
         entry = self.state.get(pathlib.Path(path).stem)
         if not entry or entry.get("shape") is None:
@@ -393,7 +395,7 @@ class Server:
             # base part's 18. Matched on the built values, never on a mode flag, so
             # one slider drag off the variant honestly puts the base rules back.
             ctx = self._context(path, entry["variant"])
-            found = checks.run(entry["shape"], ctx)
+            found = checks.run(entry["shape"], ctx, stop=stop)
             # Each finding carries the triangles of the face it fired on, so the viewer
             # can paint the face itself instead of dropping a pin near it. Rounded to
             # 0.01mm, which is display precision, not geometry.
@@ -424,6 +426,10 @@ class Server:
                 }
                 for f, row in zip(found, rows)
             ]
+        except Interrupted:
+            # A rebuild is queued, so let its geometry land before spending more time
+            # here. None tells drain to keep this path pending and retry it afterward.
+            return None
         except Exception as exc:
             entry["findings"] = [
                 {
@@ -1254,8 +1260,27 @@ class Server:
                     grew = True
         return found - set(paths)
 
+    async def _finish_check(self, path):
+        """Check one settled build; False means a newer rebuild interrupted it."""
+        async with self.building:
+            entry = await asyncio.to_thread(
+                self.check, path, lambda: not self.queue.empty()
+            )
+        if entry is None:
+            return False
+        if entry.get("findings") is not None:
+            await self.broadcast(entry, kind="checked")
+            bad = sum(1 for f in entry["findings"] if f["severity"] == "fail")
+            if entry["findings"]:
+                print(
+                    f"    {len(entry['findings'])} finding(s), {bad} to fix",
+                    flush=True,
+                )
+        return True
+
     async def drain(self):
         """Rebuild on file change, coalescing the burst an editor save produces."""
+        pending_checks = set()
         while True:
             paths = {await self.queue.get()}
             await asyncio.sleep(0.05)
@@ -1270,6 +1295,7 @@ class Server:
                     name = pathlib.Path(path).stem
                     existed = self.state.pop(name, None) is not None
                     self.overrides.pop(name, None)
+                    pending_checks.discard(path)
                     if existed:
                         print(f"  {name}: gone", flush=True)
                     # Also notify for a source deleted before its first build. A
@@ -1282,23 +1308,19 @@ class Server:
                 status = entry["error"] or f"{entry['ms']}ms"
                 print(f"  {entry['name']}: {status}", flush=True)
                 await self.broadcast(entry)
-                # Geometry has landed, so the rules can take their time. Not the lock,
-                # though: with another rebuild already waiting, these findings describe
-                # a solid the next build is about to replace, and the slider that
-                # queued it would sit behind them. The last build in a burst still
-                # gets its checks.
-                if not self.queue.empty():
+                pending_checks.add(path)
+            # Every geometry update in the burst lands before its checks start. If a
+            # new rebuild arrives during a motion sweep, leave that check pending,
+            # service the rebuild, then retry against the latest settled state.
+            while pending_checks and self.queue.empty():
+                path = min(pending_checks)
+                if not pathlib.Path(path).exists():
+                    pending_checks.discard(path)
                     continue
-                async with self.building:
-                    entry = await asyncio.to_thread(self.check, path)
-                if entry and entry.get("findings") is not None:
-                    await self.broadcast(entry, kind="checked")
-                    bad = sum(1 for f in entry["findings"] if f["severity"] == "fail")
-                    if entry["findings"]:
-                        print(
-                            f"    {len(entry['findings'])} finding(s), {bad} to fix",
-                            flush=True,
-                        )
+                if await self._finish_check(path):
+                    pending_checks.discard(path)
+                else:
+                    break
             # The duplication scan reads every part file, so once per settled burst,
             # not per path; a burst still queuing gets it on its last round instead.
             if self.queue.empty():
