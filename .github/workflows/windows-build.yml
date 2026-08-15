@@ -1,0 +1,62 @@
+﻿name: windows-build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - name: Install Python 3.13
+        run: uv python install 3.13
+      - name: Install Python dependencies
+        run: uv sync --locked --all-extras --dev
+      - name: Windows portability audit
+        run: uv run python tools/audit_windows.py
+      - name: Python tests
+        run: uv run pytest -q -n auto
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm ci
+      - name: Desktop tests
+        working-directory: desktop
+        run: npm test
+      - name: Build Windows installer
+        working-directory: desktop
+        run: npm run tauri -- build
+        env:
+          RUST_BACKTRACE: 1
+      - name: Validate installer artifact
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem desktop/src-tauri/target/release/bundle/nsis -Filter *.exe -File | Select-Object -First 1
+          if (-not $installer) { throw 'NSIS installer was not produced.' }
+          if ($installer.Length -lt 1MB) { throw "Installer is unexpectedly small: $($installer.Length) bytes" }
+          Write-Host "Installer: $($installer.FullName) ($($installer.Length) bytes)"
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nurb-windows-x64-installer
+          path: desktop/src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+      - name: Upstream sync audit
+        run: python tools/upstream_sync.py status

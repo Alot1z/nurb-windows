@@ -2,6 +2,7 @@ mod acp;
 mod agents;
 mod env;
 mod prefs;
+mod process;
 mod provision;
 mod registry;
 mod sessions;
@@ -84,7 +85,9 @@ async fn create_project(
     folder: Option<String>,
 ) -> Result<String, String> {
     let name = name.trim().to_string();
-    if name.is_empty() || name.contains('/') || name.starts_with('.') {
+    // On Windows the backslash is a path separator too, so a name containing
+    // one would silently create nested folders; reject both separators there.
+    if name.is_empty() || name.contains('/') || (cfg!(windows) && name.contains('\\')) || name.starts_with('.') {
         return Err("project names cannot be empty or contain slashes".into());
     }
     let base = project_base(folder, default_projects_folder_path(&app)?);
@@ -416,20 +419,13 @@ fn test_hook(app: AppHandle) {
     });
 }
 
-/// macOS ships an empty Help submenu, and a chromeless window has nowhere else to
-/// put a link. The two Help items are the only place in the app that reaches the
-/// outside world, alongside the same pair in the about box. "Check for Updates…"
-/// sits under About where every Mac app keeps it; the webview owns the update
-/// state, so the click is forwarded there as an event.
+/// Windows ships no app menu; the Help items live in the app's About box
+/// instead, so this is a no-op on Windows. Kept as a hook so a menu can return
+/// on platforms that want one without threading conditionals through run().
+#[cfg(target_os = "macos")]
 fn install_menu(app: &AppHandle) -> tauri::Result<()> {
     use tauri::menu::{Menu, MenuItem, HELP_SUBMENU_ID};
     let menu = Menu::default(app)?;
-    if let Some(appmenu) = menu.items()?.first().and_then(|i| i.as_submenu().cloned()) {
-        appmenu.insert(
-            &MenuItem::with_id(app, "app:check-updates", "Check for Updates…", true, None::<&str>)?,
-            1,
-        )?;
-    }
     if let Some(help) = menu.get(HELP_SUBMENU_ID).and_then(|i| i.as_submenu().cloned()) {
         help.append_items(&[
             &MenuItem::with_id(app, "help:github", "nurb on GitHub", true, None::<&str>)?,
@@ -438,19 +434,19 @@ fn install_menu(app: &AppHandle) -> tauri::Result<()> {
     }
     app.set_menu(menu)?;
     app.on_menu_event(|app, event| {
-        use tauri::Emitter;
         use tauri_plugin_opener::OpenerExt;
         let url = match event.id().as_ref() {
-            "app:check-updates" => {
-                let _ = app.emit("menu:check-updates", ());
-                return;
-            }
-            "help:github" => "https://github.com/Shpigford/nurb",
-            "help:issue" => "https://github.com/Shpigford/nurb/issues/new",
+            "help:github" => "https://github.com/Alot1z/nurb-windows",
+            "help:issue" => "https://github.com/Alot1z/nurb-windows/issues/new",
             _ => return,
         };
         let _ = app.opener().open_url(url, None::<&str>);
     });
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn install_menu(_app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
@@ -459,7 +455,6 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(acp::Chats::new())

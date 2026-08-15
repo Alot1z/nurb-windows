@@ -11,6 +11,10 @@ type MissingAgent = {
 /// The "need another agent?" help: the supported agents that are not on this
 /// machine, each with its vendor's installer, and the road to asking for one
 /// the app does not host yet.
+function isWindows() {
+  return /windows/i.test(navigator.userAgent);
+}
+
 export default function AgentsHelp({
   missing,
   onClose,
@@ -18,6 +22,8 @@ export default function AgentsHelp({
   missing: MissingAgent[];
   onClose: () => void;
 }) {
+  const shell = isWindows() ? "PowerShell" : "Terminal";
+  const machine = isWindows() ? "this PC" : "your Mac";
   return (
     <div className="about" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="about-card agents-help">
@@ -29,8 +35,8 @@ export default function AgentsHelp({
           {missing.length > 0 ? (
             <>
               <p>
-                These work with nurb once their command-line tool is on your Mac. Paste
-                the line into Terminal, and the agent appears in the list when you come
+                These work with nurb once their command-line tool is on {machine}. Paste
+                the line into {shell}, and the agent appears in the list when you come
                 back.
               </p>
               {missing.map((agent) => (
@@ -43,7 +49,7 @@ export default function AgentsHelp({
               ))}
             </>
           ) : (
-            <p>Every agent nurb supports is already installed on this Mac.</p>
+            <p>Every agent nurb supports is already installed on {machine}.</p>
           )}
           <p>
             Using one that isn't here?{" "}
