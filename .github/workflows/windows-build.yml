@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Manual re-run from the Actions tab without pushing, useful for verifying
+  # a fix against the latest upstream dependency pins.
+  workflow_dispatch:
 
 permissions:
   contents: read
