@@ -191,7 +191,9 @@ fn chat_ok(paths: &Paths, res: &Resources, stamp: &Stamp) -> bool {
     chat_runtime_ok(paths)
 }
 
-fn chat_runtime_ok(paths: &Paths) -> bool {
+/// Everything the chat runtime must answer, once: node, both adapters, and
+/// the two native CLIs they bundle.
+fn chat_probes_ok(paths: &Paths) -> bool {
     let mut node = Command::new(paths.node_bin());
     node.arg("--version");
     if !probe_version(node, paths.data(), NODE_VERSION, HEALTH_TIMEOUT) {
@@ -242,6 +244,19 @@ fn chat_runtime_ok(paths: &Paths) -> bool {
     }
 }
 
+/// The health check with one retry. A freshly extracted binary can fail its
+/// very first spawn on Windows: the real-time scanner is still holding the
+/// image, so the process dies once and runs cleanly forever after. Without the
+/// retry that single hiccup reads as "the install is missing a CLI" and sends
+/// the user back through a few hundred megabytes of re-download.
+fn chat_runtime_ok(paths: &Paths) -> bool {
+    if chat_probes_ok(paths) {
+        return true;
+    }
+    std::thread::sleep(Duration::from_secs(2));
+    chat_probes_ok(paths)
+}
+
 /// Run a tiny version command without trusting that a corrupt executable will
 /// return. Output goes to a file, not a pipe that a noisy or forked process can
 /// hold open forever; the last token is the version emitted by both adapters.
@@ -270,13 +285,15 @@ fn probe_output(
         std::process::id(),
         PROBE_ID.fetch_add(1, Ordering::Relaxed)
     ));
-    let Ok(output) = std::fs::OpenOptions::new()
+    // create_new left a dead file behind a killed provisioning, and Windows
+    // recycles PIDs fast enough that a later run can collide with it and fail
+    // every probe with no explanation. Overwrite any stale file instead.
+    let output = std::fs::OpenOptions::new()
         .write(true)
-        .create_new(true)
+        .create(true)
+        .truncate(true)
         .open(&output_path)
-    else {
-        return None;
-    };
+        .ok()?;
     process::own_group(&mut command);
     command
         .stdin(Stdio::null())
@@ -594,7 +611,10 @@ fn provision_chat(
     // change with app updates, not day to day.
     let _ = std::fs::remove_dir_all(paths.adapters().join("npm-cache"));
     if !chat_runtime_ok(paths) {
-        return Err("the agent install is missing a platform-native CLI".into());
+        return Err(
+            "the AI assistant install could not be verified; click try again or relaunch nurb"
+                .into(),
+        );
     }
     Ok(())
 }
