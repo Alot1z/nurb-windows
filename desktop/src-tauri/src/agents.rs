@@ -130,6 +130,7 @@ impl AgentKind {
     /// app and are never absent outside a broken dev machine.
     pub fn install_command(self) -> Option<&'static str> {
         match self {
+            Self::Cursor if cfg!(windows) => Some("irm 'https://cursor.com/install?win32=true' | iex"),
             Self::Cursor => Some("curl https://cursor.com/install -fsSL | bash"),
             Self::Grok if cfg!(windows) => Some("irm https://x.ai/cli/install.ps1 | iex"),
             Self::Grok => Some("curl -fsSL https://x.ai/cli/install.sh | bash"),
