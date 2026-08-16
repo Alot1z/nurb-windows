@@ -35,6 +35,19 @@ This file records intentional downstream changes found in the current working tr
 
 The inherited upstream updater was removed and replaced with a fork-owned channel: the plugin now points only at `Alot1z/nurb-windows` releases (`latest.json` on the fork's releases), signed by a fork keypair whose public key is committed (`desktop/signing/tauri-updater.key.pub` -> `tauri.conf.json` `plugins.updater.pubkey`) and whose private key exists only as a CI secret plus a gitignored local copy. The Windows surface is the rail's "check for updates" button; the macOS "Check for Updates…" menu item forwards to the same flow. `.github/workflows/windows-release.yml` builds the signed installer on the `v*` tag and publishes the installer, `.sig`, and `latest.json` to the fork's release. Builds fail loudly when the signing key is absent, so an unsigned update channel cannot ship. See `docs/windows/RELEASE.md` for the secret setup.
 
+## Chat runtime health check (Windows hardening)
+
+`provision.rs` health probes now retry once after a short pause: a freshly
+extracted binary can fail its very first spawn on Windows while the real-time
+scanner holds the image, and one retry turns that transient into a successful
+provision instead of the old "the agent install is missing a platform-native
+CLI" error and a full re-download. The probe output file is overwritten rather
+than created exclusively, because Windows recycles PIDs fast enough that a
+stale `.health-*` file left by a killed provisioning could collide and fail
+every probe with no explanation. The error message now says what to do (retry
+or relaunch) instead of misreporting a missing CLI when any of the five probes
+(node, both adapters, both native CLIs) was the actual failure.
+
 ## Windows-only Python fixes worth remembering
 
 - `src/nurb/platform/paths.py` `home_dir()` honors `HOME` even on Windows, where `pathlib.Path.home()` only reads `USERPROFILE`. This is what makes the skill-install tests (which monkeypatch `HOME`) pass, and it is the right semantic for agents that set `HOME` to stage a skill.
