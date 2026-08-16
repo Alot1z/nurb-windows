@@ -1,0 +1,53 @@
+﻿name: upstream-sync
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Add upstream remote
+        shell: pwsh
+        run: git remote add upstream https://github.com/Shpigford/nurb.git
+      - name: Fetch upstream
+        run: git fetch upstream main --prune
+      - name: Report upstream delta
+        run: python tools/upstream_sync.py status
+      - name: Prepare synchronization branch when needed
+        id: sync
+        shell: pwsh
+        run: |
+          $behind = [int](git rev-list --count HEAD..upstream/main)
+          "behind=$behind" >> $env:GITHUB_OUTPUT
+          if ($behind -eq 0) {
+            Write-Host 'Upstream is current.'
+            exit 0
+          }
+          $branch = "upstream-sync/$((git rev-parse --short upstream/main))"
+          git switch -C $branch
+          git merge --no-commit --no-ff upstream/main
+          if ($LASTEXITCODE -ne 0) {
+            git merge --abort
+            throw 'Upstream merge has conflicts; leaving the PR for manual preparation.'
+          }
+          git commit -m 'Sync upstream nurb'
+          git push --force-with-lease origin $branch
+          "branch=$branch" >> $env:GITHUB_OUTPUT
+      - name: Open synchronization PR
+        if: steps.sync.outputs.behind != '0' && steps.sync.outputs.branch != ''
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr create --base main --head "${{ steps.sync.outputs.branch }}" --title "Sync upstream nurb" --body "Automated upstream synchronization. Review Windows-specific paths before merge." 2>$null

@@ -16,6 +16,8 @@ use std::process::Command;
 use std::sync::Mutex;
 use std::time::Duration;
 
+use crate::process;
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum AgentKind {
     Claude,
@@ -102,13 +104,14 @@ impl AgentKind {
             Self::Grok => ".grok/bin",
             Self::Claude | Self::Codex => return None,
         };
-        let home = PathBuf::from(std::env::var("HOME").ok()?);
-        let default = home.join(install_dir).join(name);
+        let name = if cfg!(windows) { format!("{name}.exe") } else { name.into() };
+        let home = home_dir()?;
+        let default = home.join(install_dir).join(&name);
         if default.is_file() {
             return Some(default);
         }
         std::env::split_paths(&std::env::var_os("PATH")?)
-            .map(|dir| dir.join(name))
+            .map(|dir| dir.join(&name))
             .find(|candidate| candidate.is_file())
     }
 
@@ -128,6 +131,7 @@ impl AgentKind {
     pub fn install_command(self) -> Option<&'static str> {
         match self {
             Self::Cursor => Some("curl https://cursor.com/install -fsSL | bash"),
+            Self::Grok if cfg!(windows) => Some("irm https://x.ai/cli/install.ps1 | iex"),
             Self::Grok => Some("curl -fsSL https://x.ai/cli/install.sh | bash"),
             Self::Claude | Self::Codex => None,
         }
@@ -234,8 +238,18 @@ fn auth_file(dir: &str) -> PathBuf {
     } else {
         None
     };
-    home.unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(dir))
+    home.or_else(home_dir)
+        .unwrap_or_default()
+        .join(dir)
         .join("auth.json")
+}
+
+/// The user's home: HOME when a shell sets it (Git Bash), USERPROFILE on
+/// Windows, the OS's answer elsewhere.
+fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
 }
 
 /// `agent status` prints "Not logged in" signed out and account details
@@ -258,9 +272,9 @@ fn cursor_auth_status(kind: AgentKind) -> (Option<bool>, Option<String>) {
     }
 }
 
-/// Login children still running at app exit, killed by process group like
-/// every other child the app spawns.
-pub struct Logins(Mutex<Vec<i32>>);
+/// Login children still running at app exit, killed by tree like every other
+/// child the app spawns.
+pub struct Logins(Mutex<Vec<u32>>);
 
 impl Logins {
     pub fn new() -> Self {
@@ -268,10 +282,8 @@ impl Logins {
     }
 
     pub fn shutdown(&self) {
-        for pgid in self.0.lock().unwrap().drain(..) {
-            unsafe {
-                libc::killpg(pgid, libc::SIGTERM);
-            }
+        for pid in self.0.lock().unwrap().drain(..) {
+            process::kill_tree(pid);
         }
     }
 }
@@ -307,9 +319,8 @@ pub async fn agent_login(app: tauri::AppHandle, agent: String) -> Result<(), Str
         // own subcommand.
         AgentKind::Cursor | AgentKind::Grok => args = vec!["login".into()],
     }
-    let (pgid_tx, pgid_rx) = std::sync::mpsc::channel::<i32>();
+    let (pid_tx, pid_rx) = std::sync::mpsc::channel::<u32>();
     let done = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
-        use std::os::unix::process::CommandExt;
         let mut command = Command::new(program);
         if let Some(path) = adapter_path {
             command.env("PATH", path);
@@ -317,20 +328,20 @@ pub async fn agent_login(app: tauri::AppHandle, agent: String) -> Result<(), Str
         if let Some(cli) = codex_cli {
             command.env("CODEX_PATH", cli);
         }
+        process::own_group(&mut command);
         let mut child = command
             .args(&args)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
-            .process_group(0)
             .spawn()
             .map_err(|e| format!("could not start the sign-in: {e}"))?;
-        let pgid = child.id() as i32;
-        let _ = pgid_tx.send(pgid);
+        let pid = child.id();
+        let _ = pid_tx.send(pid);
         let handle = app.state::<Logins>();
-        handle.0.lock().unwrap().push(pgid);
+        handle.0.lock().unwrap().push(pid);
         let status = child.wait();
-        handle.0.lock().unwrap().retain(|p| *p != pgid);
+        handle.0.lock().unwrap().retain(|p| *p != pid);
         let status = status.map_err(|e| format!("sign-in failed: {e}"))?;
         if status.success() {
             Ok(())
@@ -341,14 +352,12 @@ pub async fn agent_login(app: tauri::AppHandle, agent: String) -> Result<(), Str
         }
     });
     // A human in a browser sets the pace; ten minutes is generous. On timeout
-    // the process group is killed, which also unblocks the waiting thread.
+    // the process tree is killed, which also unblocks the waiting thread.
     match tokio::time::timeout(Duration::from_secs(600), done).await {
         Ok(joined) => joined.map_err(|e| e.to_string())?,
         Err(_) => {
-            if let Ok(pgid) = pgid_rx.try_recv() {
-                unsafe {
-                    libc::killpg(pgid, libc::SIGTERM);
-                }
+            if let Ok(pid) = pid_rx.try_recv() {
+                process::kill_tree(pid);
             }
             Err("The sign-in timed out. Try again.".into())
         }

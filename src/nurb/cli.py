@@ -4,8 +4,11 @@ import argparse
 import asyncio
 import errno
 import importlib.metadata
+import os
 import pathlib
 import sys
+
+from .platform import home_dir
 
 PART_TEMPLATE = '''from nurb import *
 
@@ -734,9 +737,12 @@ def skill_targets():
     """The two paths nurb's install flow writes the skill to.
 
     skills.sh's universal directory and the Claude fallback. Shared with the dev
-    server's staleness nudge so the two never check different paths.
+    server's staleness nudge so the two never check different paths. The home
+    comes from the platform layer: on Windows, HOME is respected when a shell
+    sets it (Git Bash) and USERPROFILE otherwise, so the same paths work in a
+    test that moves HOME and on a real machine.
     """
-    home = pathlib.Path.home()
+    home = home_dir()
     return [
         home / ".agents" / "skills" / "nurb" / "SKILL.md",
         home / ".claude" / "skills" / "nurb" / "SKILL.md",
@@ -761,7 +767,7 @@ def cmd_skill(args):
     if not args.sync:
         print(skill)
         return
-    home = pathlib.Path.home()
+    home = home_dir()
     targets = skill_targets()
     seen = set()
     found = False
@@ -778,7 +784,9 @@ def cmd_skill(args):
         if real.read_text(encoding="utf-8") != skill:
             real.write_text(skill, encoding="utf-8")
             state = "updated"
-        print(f"  ~/{target.relative_to(home)}: {state}")
+        # as_posix so the path reads the same in Explorer and a terminal on
+        # Windows, where relative_to yields backslashes.
+        print(f"  ~/{target.relative_to(home).as_posix()}: {state}")
     if not found:
         print("  no installed skill found. install one: npx skills add shpigford/nurb")
 
@@ -853,7 +861,7 @@ def cmd_slice(args):
     if exe is None:
         sys.exit(
             f"  no slicer found. `nurb slice` drives one you already have installed:\n"
-            f"  {' or '.join(slicing.SLICERS)}, in /Applications, on PATH, or through Flatpak.\n"
+            f"  {' or '.join(slicing.SLICERS)}, {slicing.where_to_look()}.\n"
             f"  `nurb export` writes the 3MF if you would rather open it yourself."
         )
     try:
@@ -864,7 +872,7 @@ def cmd_slice(args):
         sys.exit(
             "  no printer chosen, and a slice is meaningless without one.\n"
             "  Name the machine once in printer.toml (`profile = \"bambu_a1_mini\"`),\n"
-            f"  in ~/.config/nurb/config.toml for every project, or pass --printer.\n"
+            f"  in {checks.global_file()} for every project, or pass --printer.\n"
             f"  have: {', '.join(sorted(checks.profiles()))}"
         )
     vendors = slicing.vendors(exe)
@@ -1082,7 +1090,14 @@ def _is_free(port):
     import socket
 
     with socket.socket() as probe:
-        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        if os.name == "nt":
+            # SO_REUSEADDR on Windows lets a new socket bind over a live
+            # listener, which would report a busy port as free and send the
+            # second `nurb dev` into a bind failure instead of the "already
+            # serving" refusal. SO_EXCLUSIVEADDRUSE is the real probe.
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        else:
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             probe.bind(("127.0.0.1", port))
             return True
@@ -1181,25 +1196,36 @@ def cmd_dev(args):
         sys.exit(f"  port {port} was taken between checking it and binding it. Try again.")
 
 
-LAUNCHER = "viewer.command"
+LAUNCHER = "viewer.cmd" if os.name == "nt" else "viewer.command"
 
 
 def _write_launcher(root):
     file = root / LAUNCHER
-    # A login shell, because Finder's Terminal session does not carry the PATH a
-    # profile adds, and the double-click would die on `command not found: nurb`.
-    file.write_text(
-        "#!/bin/zsh -l\n"
-        'cd "$(dirname "$0")"\n'
-        "exec nurb dev --open\n"
-    )
-    file.chmod(0o755)
+    if os.name == "nt":
+        # newline="" so Windows text mode does not turn the explicit \r\n into
+        # \r\r\n: the batch file's line endings have to be exactly CRLF.
+        file.write_text(
+            "@echo off\r\n"
+            'cd /d "%~dp0"\r\n'
+            "nurb dev --open\r\n",
+            encoding="utf-8",
+            newline="",
+        )
+    else:
+        file.write_text(
+            "#!/bin/zsh -l\n"
+            'cd "$(dirname "$0")"\n'
+            "exec nurb dev --open\n",
+            encoding="utf-8",
+        )
+        file.chmod(0o755)
     return file
 
 
 def cmd_launcher(args):
     _write_launcher(project_root())
-    print(f"  {LAUNCHER}: double-click in Finder to serve this project")
+    target = "double-click in Explorer to serve this project" if os.name == "nt" else "double-click in Finder to serve this project"
+    print(f"  {LAUNCHER}: {target}")
 
 
 def main(argv=None):

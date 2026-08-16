@@ -23,6 +23,7 @@ import pathlib
 import re
 import shutil
 import subprocess
+import sys
 
 # Slicers that share the one CLI grammar this module speaks: `--load-settings`,
 # `--load-filaments`, `--slice`, `--outputdir`, and a bundled tree of vendor profiles
@@ -50,17 +51,41 @@ class Unavailable(Exception):
     """No slicer, or no profile in it for this machine. The message says what to do."""
 
 
+def _windows_install_roots():
+    """The directories the Windows installers put these apps in.
+
+    Both slicers install per-user under %LOCALAPPDATA%\Programs by default;
+    machine-wide installs land under Program Files. Each app's own directory
+    holds the .exe with resources/ beside it, so once the exe is found the
+    profile bundle resolves the same way as everywhere else.
+    """
+    home = pathlib.Path.home()
+    local = pathlib.Path(os.environ.get("LOCALAPPDATA", home / "AppData" / "Local")) / "Programs"
+    machine = pathlib.Path(os.environ.get("PROGRAMFILES", "C:/Program Files"))
+    machine_x86 = pathlib.Path(
+        os.environ.get("PROGRAMFILES(X86)", "C:/Program Files (x86)")
+    )
+    return [local, machine, machine_x86]
+
+
 def app(search=None):
     """The installed slicer's executable, or None.
 
     macOS keeps it in a bundle. Linux uses a command, an AppImage on PATH, or one of
-    the two official Flatpaks. A Flatpak is returned as its command prefix; `run`
-    appends the slicing arguments in exactly the same way it does for an executable.
+    the two official Flatpaks. Windows looks in the standard install roots and on
+    PATH. A Flatpak is returned as its command prefix; `run` appends the slicing
+    arguments in exactly the same way it does for an executable.
     """
     for name in search or SLICERS:
-        bundle = pathlib.Path(f"/Applications/{name}.app/Contents/MacOS/{name}")
-        if bundle.is_file():
-            return bundle
+        if os.name == "nt":
+            for root in _windows_install_roots():
+                for candidate in (root / name / f"{name}.exe", root / name / f"{name.lower()}.exe"):
+                    if candidate.is_file():
+                        return candidate
+        else:
+            bundle = pathlib.Path(f"/Applications/{name}.app/Contents/MacOS/{name}")
+            if bundle.is_file():
+                return bundle
         for command in COMMANDS.get(name, (name, name.lower())):
             found = shutil.which(command)
             if found:
@@ -78,6 +103,15 @@ def app(search=None):
         if app_id and flatpak and any(root.is_dir() for root in _flatpak_roots(app_id)):
             return (flatpak, "run", app_id)
     return None
+
+
+def where_to_look():
+    """Where this platform keeps the slicers, for the 'no slicer found' message."""
+    if os.name == "nt":
+        return "under %LOCALAPPDATA%\\Programs, in Program Files, or on PATH"
+    if sys.platform == "darwin":
+        return "in /Applications, on PATH, or through Flatpak"
+    return "on PATH, as an AppImage, or through Flatpak"
 
 
 def vendors(exe):
@@ -128,7 +162,7 @@ def _resource_names(flavor):
 
 
 def _flatpak_roots(app_id):
-    if not app_id:
+    if not app_id or os.name == "nt":
         return ()
     home = pathlib.Path.home()
     return (
@@ -138,8 +172,11 @@ def _flatpak_roots(app_id):
 
 
 def _user_profile_roots(flavor):
-    """Profile caches written after an AppImage or Flatpak has run once."""
+    """Profile caches written after an app has run once."""
     home = pathlib.Path.home()
+    if os.name == "nt":
+        appdata = pathlib.Path(os.environ.get("APPDATA", home / "AppData" / "Roaming"))
+        return [appdata / flavor / "system"]
     config = pathlib.Path(os.environ.get("XDG_CONFIG_HOME", home / ".config"))
     app_id = FLATPAKS[flavor]
     return [

@@ -173,7 +173,7 @@ def _new(tmp_path, name="thing", root=None):
     was = os.getcwd()
     os.chdir(tmp_path)
     try:
-        cli.cmd_new(argparse.Namespace(name=name, root=root))
+        cli.cmd_new(argparse.Namespace(name=name, root=str(tmp_path) if root is None else root))
     finally:
         os.chdir(was)
 
@@ -481,26 +481,40 @@ def test_export_refuses_a_format_it_cannot_write(tmp_path, monkeypatch, capsys):
 def test_the_first_part_brings_the_launcher(tmp_path, monkeypatch):
     """Project birth is the only moment it appears on its own; deleting it sticks."""
     monkeypatch.chdir(tmp_path)
-    cli.main(["new", "one"])
-    launcher = tmp_path / "viewer.command"
+    cli.main(["new", "one", "--root", str(tmp_path)])
+    launcher = tmp_path / cli.LAUNCHER
     assert launcher.exists()
     launcher.unlink()
-    cli.main(["new", "two"])
+    cli.main(["new", "two", "--root", str(tmp_path)])
     assert not launcher.exists()
 
 
 def test_launcher_is_an_executable_that_runs_dev(tmp_path, monkeypatch):
-    """Double-clickable from Finder: executable, login shell, lands on `nurb dev --open`."""
+    """Double-clickable: an executable login shell on macOS, a batch file on Windows,
+    both landing on `nurb dev --open` in the project directory."""
     import os
 
     (tmp_path / "parts").mkdir()
     monkeypatch.chdir(tmp_path)
     cli.main(["launcher"])
-    file = tmp_path / "viewer.command"
+    file = tmp_path / cli.LAUNCHER
     text = file.read_text()
-    assert text.startswith("#!/bin/zsh -l\n")
-    assert "nurb dev --open" in text
-    assert os.access(file, os.X_OK)
+    if os.name == "nt":
+        # read_text normalizes the file's CRLF to LF (universal newlines); the
+        # on-disk bytes themselves are asserted exact in test_server or by
+        # reading raw bytes, so the batch content is what matters here.
+        assert text.startswith("@echo off\n")
+        assert "nurb dev --open" in text
+        # The batch file must run from its own directory, quoted, so a project
+        # path with spaces still serves the right folder.
+        assert 'cd /d "%~dp0"' in text
+        # And its on-disk line endings must be exactly CRLF: Windows text-mode
+        # writes would double the carriage return and break cmd parsing.
+        assert file.read_bytes().startswith(b"@echo off\r\n")
+    else:
+        assert text.startswith("#!/bin/zsh -l\n")
+        assert "nurb dev --open" in text
+        assert os.access(file, os.X_OK)
 
 
 def test_export_reads_the_projects_formats(tmp_path, monkeypatch):

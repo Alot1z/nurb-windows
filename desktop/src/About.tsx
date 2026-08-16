@@ -45,7 +45,7 @@ export default function About({
     `app ${appVersion}`,
     `CAD engine ${nurbVersion}`,
     occtVersion ? `OCCT ${occtVersion}` : null,
-    `macOS ${osVersion} (${arch})`,
+    `${osVersion} (${arch})`,
   ]
     .filter(Boolean)
     .join("\n");
@@ -78,8 +78,8 @@ export default function About({
         <div className="about-body">
           <p className="about-links">
             <ExternalLink href="https://nurb.dev">nurb.dev</ExternalLink>
-            <ExternalLink href="https://github.com/Shpigford/nurb">github</ExternalLink>
-            <ExternalLink href="https://github.com/Shpigford/nurb/issues/new/choose">
+            <ExternalLink href="https://github.com/Alot1z/nurb-windows">github</ExternalLink>
+            <ExternalLink href="https://github.com/Alot1z/nurb-windows/issues/new/choose">
               report an issue
             </ExternalLink>
             <button className="about-copy" onClick={copyDebugInfo}>
@@ -87,8 +87,8 @@ export default function About({
             </button>
           </p>
           <p>
-            © 2026 Ordinary Systems LLC. nurb is source-available under FSL-1.1-MIT; each
-            release becomes MIT two years on.
+            © 2026 Ordinary Systems LLC, forked as nurb for Windows by Alot1z. nurb is
+            source-available under FSL-1.1-MIT; each release becomes MIT two years on.
           </p>
           <h3>Third-party notices</h3>
           <p>
