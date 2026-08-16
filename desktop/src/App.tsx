@@ -4,8 +4,6 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ask, message, open as pickFolder } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { check, Update } from "@tauri-apps/plugin-updater";
-import { relaunch } from "@tauri-apps/plugin-process";
 import About from "./About";
 import AgentsHelp from "./AgentsHelp";
 import Chat, { AGENT_LABEL, PROJECT_CHAT } from "./Chat";
@@ -104,7 +102,9 @@ function DeleteHints({ places }: { places: string[] }) {
           building
         </span>
       )}
-      <span className="context-hint">moves its files to the Trash</span>
+      <span className="context-hint">
+        moves its files to the {/windows/i.test(navigator.userAgent) ? "Recycle Bin" : "Trash"}
+      </span>
     </>
   );
 }
@@ -247,39 +247,11 @@ function App() {
   const [projectsFolder, setProjectsFolder] = useState<string | null>(
     () => localStorage.getItem(PROJECTS_FOLDER_KEY),
   );
-  const [update, setUpdate] = useState<Update | null>(null);
-  const [updating, setUpdating] = useState(false);
-  // The one update this run acts on: found once, downloaded eagerly so the
-  // restart is instant. `ready` resolves false if the background download
-  // failed, in which case installing downloads again.
-  const found = useRef<{ update: Update; ready: Promise<boolean> } | null>(null);
-
   useEffect(() => {
     invoke<boolean>("provision_status")
       .then(setReady)
       .catch(() => setReady(false));
   }, []);
-
-  // Checks run outside the provisioning gate: an app whose first-run setup is
-  // broken can still be rescued by an update. `tauri dev` serves the vite dev
-  // build and skips the check entirely.
-  const findUpdate = useCallback(async () => {
-    if (!import.meta.env.PROD || found.current) return found.current?.update ?? null;
-    const next = await check();
-    if (next && !found.current) {
-      found.current = { update: next, ready: next.download().then(() => true, () => false) };
-      setUpdate(next);
-    }
-    return next;
-  }, []);
-
-  useEffect(() => {
-    // At launch and every six hours after: the app stays open for days, and a
-    // missing or unreachable endpoint fails silently on these timed checks.
-    findUpdate().catch(() => {});
-    const timer = setInterval(() => findUpdate().catch(() => {}), 6 * 60 * 60 * 1000);
-    return () => clearInterval(timer);
-  }, [findUpdate]);
 
   useEffect(() => {
     if (ready !== true) return;
@@ -287,56 +259,14 @@ function App() {
     invoke<string>("default_projects_folder").then(setDefaultProjectsFolder).catch(() => {});
   }, [ready]);
 
-  const installUpdate = useCallback(async () => {
-    if (!found.current || updating) return;
-    setUpdating(true);
-    setError(null);
-    try {
-      const pending = found.current;
-      if (await pending.ready) await pending.update.install();
-      else await pending.update.downloadAndInstall();
-      await relaunch();
-    } catch (e) {
-      setError(String(e));
-      setUpdating(false);
-    }
-  }, [updating]);
 
-  // The macOS "Check for Updates…" item. The menu lives in Rust and the
-  // update state lives here, so the click arrives as an event; unlike the
-  // timed checks, this one answers even when there is nothing to install.
-  useEffect(() => {
-    const unlisten = listen("menu:check-updates", async () => {
-      // The dev build never checks, so saying "newest version" would be a lie.
-      if (!import.meta.env.PROD) return;
-      try {
-        const next = await findUpdate();
-        if (!next) {
-          await message("You're on the newest version.", { title: "nurb" });
-        } else if (
-          await ask(`nurb ${next.version} is ready to install.`, {
-            title: "nurb",
-            okLabel: "Restart & Update",
-            cancelLabel: "Later",
-          })
-        ) {
-          await installUpdate();
-        }
-      } catch (e) {
-        setError(String(e));
-      }
-    });
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, [findUpdate, installUpdate]);
 
   // Two things the embedded viewer cannot do for itself. It forwards mousedowns
   // from its own top strip (the titlebar area lives inside the iframe, out of
   // data-tauri-drag-region's reach) and the shell starts the native window drag.
   // And its STL/STEP buttons write into the project's build folder, then hand
-  // over the path: a webview ignores an <a download>, so the file is revealed in
-  // Finder instead of downloaded.
+  // over the path: a webview ignores an <a download>, so the file is revealed
+  // in the file manager (Finder, Explorer) instead of downloaded.
   const focusProjectChat = useCallback((seed?: string) => {
     // The column itself mounts via the focus effect below, once the project's
     // session list has arrived.
@@ -1168,11 +1098,6 @@ function App() {
           {about && (
             <button className="rail-version" onClick={() => setShowAbout(true)}>
               nurb {about.appVersion}
-            </button>
-          )}
-          {update && (
-            <button className="rail-update" disabled={updating} onClick={installUpdate}>
-              {updating ? "updating…" : `update to ${update.version}`}
             </button>
           )}
         </div>

@@ -7,6 +7,7 @@ two numbers from the files a slicer leaves behind.
 """
 
 import json
+import os
 import pathlib
 from types import SimpleNamespace
 
@@ -386,7 +387,9 @@ def test_no_slicer_installed_is_none_not_a_crash():
 
 
 def test_a_hyphenated_linux_command_and_share_tree_are_found(tmp_path, monkeypatch):
-    exe = tmp_path / "usr" / "bin" / "orca-slicer"
+    # shutil.which on Windows only finds executables with a PATHEXT extension.
+    name = "orca-slicer" + (".exe" if os.name == "nt" else "")
+    exe = tmp_path / "usr" / "bin" / name
     exe.parent.mkdir(parents=True)
     exe.write_text("#!/bin/sh\n")
     exe.chmod(0o755)

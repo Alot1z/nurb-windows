@@ -52,7 +52,9 @@ def _latest_on_pypi():
     import time
     import urllib.request
 
-    cache = pathlib.Path.home() / ".cache" / "nurb" / "latest"
+    from .platform import user_cache_dir
+
+    cache = user_cache_dir() / "latest"
     try:
         stamp, cached = cache.read_text().split()
         if time.time() - float(stamp) < 86400:
