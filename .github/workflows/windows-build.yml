@@ -40,18 +40,26 @@ jobs:
       - name: Desktop tests
         working-directory: desktop
         run: npm test
-      - name: Build Windows installer
+      - name: Build Windows installer and updater artifacts
         working-directory: desktop
         run: npm run tauri -- build
         env:
           RUST_BACKTRACE: 1
+          # createUpdaterArtifacts is on, so the private key is required.
+          # Set both secrets in the repository, or the build fails loudly
+          # instead of shipping an unsigned update channel.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
       - name: Validate installer artifact
         shell: pwsh
         run: |
           $installer = Get-ChildItem desktop/src-tauri/target/release/bundle/nsis -Filter *.exe -File | Select-Object -First 1
           if (-not $installer) { throw 'NSIS installer was not produced.' }
           if ($installer.Length -lt 1MB) { throw "Installer is unexpectedly small: $($installer.Length) bytes" }
+          $signature = Get-ChildItem desktop/src-tauri/target/release/bundle/nsis -Filter *.exe.sig -File | Select-Object -First 1
+          if (-not $signature) { throw 'Updater signature (.sig) was not produced.' }
           Write-Host "Installer: $($installer.FullName) ($($installer.Length) bytes)"
+          Write-Host "Signature: $($signature.FullName)"
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:

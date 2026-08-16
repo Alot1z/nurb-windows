@@ -4,6 +4,8 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ask, message, open as pickFolder } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
+import { check, Update } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 import About from "./About";
 import AgentsHelp from "./AgentsHelp";
 import Chat, { AGENT_LABEL, PROJECT_CHAT } from "./Chat";
@@ -247,11 +249,91 @@ function App() {
   const [projectsFolder, setProjectsFolder] = useState<string | null>(
     () => localStorage.getItem(PROJECTS_FOLDER_KEY),
   );
+  // The update this run found. null until the first check settles, so the rail
+  // never flashes a button. The update downloads eagerly once found, so the
+  // restart is instant; a failed background download makes `ready` resolve
+  // false and the install downloads again.
+  const [update, setUpdate] = useState<Update | null>(null);
+  const [updating, setUpdating] = useState(false);
+  const found = useRef<{ update: Update; ready: Promise<boolean> } | null>(null);
+
   useEffect(() => {
     invoke<boolean>("provision_status")
       .then(setReady)
       .catch(() => setReady(false));
   }, []);
+
+  // Checks run outside the provisioning gate: an app whose first-run setup is
+  // broken can still be rescued by an update. `tauri dev` serves the vite dev
+  // build and skips the check entirely. The endpoint is pinned to this fork's
+  // GitHub release (tauri.conf.json), never upstream nurb's channel.
+  const findUpdate = useCallback(async () => {
+    if (!import.meta.env.PROD || found.current) return found.current?.update ?? null;
+    const next = await check();
+    if (next && !found.current) {
+      found.current = { update: next, ready: next.download().then(() => true, () => false) };
+      setUpdate(next);
+    }
+    return next;
+  }, []);
+
+  useEffect(() => {
+    // At launch and every six hours after: the app stays open for days, and a
+    // missing or unreachable endpoint fails silently on these timed checks.
+    findUpdate().catch(() => {});
+    const timer = setInterval(() => findUpdate().catch(() => {}), 6 * 60 * 60 * 1000);
+    return () => clearInterval(timer);
+  }, [findUpdate]);
+
+  useEffect(() => {
+    if (ready !== true) return;
+    invoke<AboutInfo>("about_info").then(setAbout).catch(() => {});
+    invoke<string>("default_projects_folder").then(setDefaultProjectsFolder).catch(() => {});
+  }, [ready]);
+
+  const installUpdate = useCallback(async () => {
+    if (!found.current || updating) return;
+    setUpdating(true);
+    setError(null);
+    try {
+      const pending = found.current;
+      if (await pending.ready) await pending.update.install();
+      else await pending.update.downloadAndInstall();
+      await relaunch();
+    } catch (e) {
+      setError(String(e));
+      setUpdating(false);
+    }
+  }, [updating]);
+
+  // The macOS "Check for Updates…" menu item forwards here; Windows users get
+  // the same check from the rail button. Unlike the timed checks, this one
+  // answers even when there is nothing to install.
+  useEffect(() => {
+    const unlisten = listen("menu:check-updates", async () => {
+      // The dev build never checks, so saying "newest version" would be a lie.
+      if (!import.meta.env.PROD) return;
+      try {
+        const next = await findUpdate();
+        if (!next) {
+          await message("You're on the newest version.", { title: "nurb" });
+        } else if (
+          await ask(`nurb ${next.version} is ready to install.`, {
+            title: "nurb",
+            okLabel: "Restart & Update",
+            cancelLabel: "Later",
+          })
+        ) {
+          await installUpdate();
+        }
+      } catch (e) {
+        setError(String(e));
+      }
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [findUpdate, installUpdate]);
 
   useEffect(() => {
     if (ready !== true) return;
@@ -1098,6 +1180,19 @@ function App() {
           {about && (
             <button className="rail-version" onClick={() => setShowAbout(true)}>
               nurb {about.appVersion}
+            </button>
+          )}
+          {update ? (
+            <button className="rail-update" disabled={updating} onClick={installUpdate}>
+              {updating ? "updating…" : `update to ${update.version}`}
+            </button>
+          ) : (
+            <button
+              className="rail-version"
+              title="check for updates"
+              onClick={() => findUpdate().catch(() => setError("Could not reach the update server."))}
+            >
+              check for updates
             </button>
           )}
         </div>

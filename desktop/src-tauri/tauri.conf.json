@@ -31,10 +31,18 @@
       }
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE4QkU4NTZDMkVDNzU1NjUKUldSbFZjY3ViSVcrR0k3VkpaeURicXZZQmE3QTRsUmlrNnZGRlEweXZaTmtFMXREYy9mK3pPbmEK",
+      "endpoints": [
+        "https://github.com/Alot1z/nurb-windows/releases/latest/download/latest.json"
+      ]
+    }
+  },
   "bundle": {
     "active": true,
     "targets": ["nsis"],
-    "createUpdaterArtifacts": false,
+    "createUpdaterArtifacts": true,
     "externalBin": ["binaries/uv"],
     "resources": ["resources/*"],
     "icon": [
