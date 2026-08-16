@@ -1,38 +1,30 @@
-# nurb
+# nurb for Windows
 
-Agentic CAD for 3D printing. The user is a language model: your agent writes parts as Python functions, nurb builds them into real solids, checks them against print physics, and shows you the result live. You judge, drag sliders, download the 3MF.
+Agentic CAD for 3D printing, rebuilt as a first-class Windows application. Your agent writes parts as Python functions, nurb builds them into real solids, checks them against print physics, and shows you the result live. You judge, drag sliders, download the 3MF.
+
+This repository is a fork of [upstream nurb](https://github.com/Shpigford/nurb) that keeps the upstream engine mergeable while adding a Windows-native desktop app, installer, runtime provisioning, signed auto-updates, and Windows CI. Everything that runs on macOS and Linux in upstream still runs here; the difference is that Windows is now a first-class target rather than an afterthought.
 
 <img width="2062" height="1232" alt="Viewer" src="https://github.com/user-attachments/assets/77c7c392-3454-42a0-aaf6-159b81e7dcff" />
 
 ## Install
 
-The easiest way in is the Mac app. Download it for [**Apple silicon**](https://github.com/Shpigford/nurb/releases/latest/download/nurb.dmg) or [**Intel Macs**](https://github.com/Shpigford/nurb/releases/latest/download/nurb-intel.dmg). Your projects, your AI, and the live viewer in one window; it sets everything up the first time you open it and updates itself.
+The easiest way in is the Windows app. Download `nurb_<version>_x64-setup.exe` from the [latest release](https://github.com/Alot1z/nurb-windows/releases/latest) and run it. Your projects, your AI, and the live viewer in one window; the first launch provisions Python, OCCT, the Node adapters, and the nurb wheel into your app data, and the app updates itself from this fork's release channel. Windows 10/11 x64 is the primary target; the installer is per-user, so no administrator rights are needed.
 
-For the command line:
+For the command line on Windows:
 
-```bash
-curl -fsSL https://nurb.dev/install.sh | sh
+```powershell
+uv tool install nurb
 ```
 
-One line, installs everything below: uv if you don't have it, nurb, and the skill. Prefer your own package manager? `uv tool install nurb` (or `pip install nurb`) does the first half.
+or `pip install nurb`. On macOS and Linux the upstream one-line installer still works (`curl -fsSL https://nurb.dev/install.sh | sh`), and this repo's CLI is drop-in compatible.
 
 ## Which model should you use?
 
-nurb works with whatever AI subscription you already pay for, and they are not equally good at designing parts. We run the popular models through the same real part-design jobs and grade the actual geometry by machine, so you can pick based on what you subscribe to and what you are willing to spend: [nurb.dev/benchmarks](https://nurb.dev/benchmarks.html). The raw rows, transcripts, and grading code live in [evals/](evals/), and adding a row for your model is one line on your own subscription, single runs welcome:
-
-```bash
-curl -fsSL https://nurb.dev/bench.sh | sh
-```
+nurb works with whatever AI subscription you already pay for, and they are not equally good at designing parts. We run the popular models through the same real part-design jobs and grade the actual geometry by machine, so you can pick based on what you subscribe to and what you are willing to spend: [nurb.dev/benchmarks](https://nurb.dev/benchmarks.html). The raw rows, transcripts, and grading code live in [evals/](evals/).
 
 ## Teach your agent
 
-Install the nurb skill once and your agent reaches for nurb on its own whenever you ask for a printable part. The installer above already did this; by hand, [skills.sh](https://www.skills.sh/) detects whatever harnesses you have and installs into each:
-
-```bash
-npx skills add shpigford/nurb
-```
-
-Or `nurb skill` prints the same skill file out for you. Later, `nurb update` upgrades nurb and rewrites the installed skill to match, so the two move together.
+Install the nurb skill once and your agent reaches for nurb on its own whenever you ask for a printable part. `nurb skill` prints the skill file out, and `nurb update` upgrades nurb and rewrites the installed skill to match, so the two move together. The skill is written for the platform it runs on: on Windows it teaches `%APPDATA%\nurb\config.toml`, `viewer.cmd`, and PowerShell, not the Unix equivalents.
 
 ## Make something
 
@@ -79,10 +71,10 @@ nurb verify [part]  run the doctrine's verification list; --report bundles it wi
 nurb render [part]  write a PNG into build/renders/; --section cuts it open
 nurb export [part]  write 3MF into build/, --formats for STL, STEP or GLB
 nurb extract        find duplication across parts
-nurb launcher       write viewer.command, a double-clickable `nurb dev`
+nurb launcher       write viewer.cmd, a double-clickable `nurb dev`
 ```
 
-A project is any directory with a `parts/` folder. No init step. The first `nurb new` in a fresh directory also drops `viewer.command`, so a project can be opened from Finder by double-click from day one; delete it and it stays deleted, `nurb launcher` brings it back on purpose.
+A project is any directory with a `parts/` folder. No init step. The first `nurb new` in a fresh directory also drops `viewer.cmd`, so a project can be opened from Explorer by double-click from day one; delete it and it stays deleted, `nurb launcher` brings it back on purpose.
 
 ## Checks
 
@@ -104,7 +96,7 @@ projection_ratio  reach over height, for a part cantilevered off a wall
 build_volume      does it fit the printer at all
 ```
 
-Name your machine once in `printer.toml` (`profile = "bambu_a1_mini"`), or try another with `nurb check --printer prusa_mk4s`. The viewer's print time row will also ask you for it the first time you use it, and write the answer here. Better: a printer is a fact about your workshop, not your project, so `~/.config/nurb/config.toml` takes the same schema and answers for every project on the machine; `printer.toml` wins where they disagree, and `nurb check` says which file supplied the profile. Either file can also name what you print in (`material = "abs"`), and `warp_risk` tightens to match how hard that plastic shrinks. Either file carries the export preference too: an `[export]` table with `formats = ["3mf", "step"]` adds STEP to every `nurb export`, and `--formats` still wins for one run. A part records what it has already justified on its card, so known findings stay silent and new ones are regressions:
+Name your machine once in `printer.toml` (`profile = "bambu_a1_mini"`), or try another with `nurb check --printer prusa_mk4s`. The viewer's print time row will also ask you for it the first time you use it, and write the answer here. Better: a printer is a fact about your workshop, not your project, so nurb keeps the standing answers in a per-user config file, `%APPDATA%\nurb\config.toml` on Windows (`~/.config/nurb/config.toml` on macOS and Linux); `printer.toml` wins where they disagree, and `nurb check` says which file supplied the profile. Either file can also name what you print in (`material = "abs"`), and `warp_risk` tightens to match how hard that plastic shrinks. Either file carries the export preference too: an `[export]` table with `formats = ["3mf", "step"]` adds STEP to every `nurb export`, and `--formats` still wins for one run. A part records what it has already justified on its card, so known findings stay silent and new ones are regressions:
 
 ```toml
 [part]
@@ -149,15 +141,29 @@ build/renders/      generated PNGs and verification reports
 
 `nurb dev` is a long-lived process because importing the kernel costs 45s cold. After that, rebuilds run 30 to 400ms depending on the part, which matters because an agent iterates in save-check cycles, dozens per part.
 
+## The fork
+
+This fork's one rule: upstream changes stay easy to port. The upstream engine is left as-is wherever possible; Windows-specific behavior lives in `src/nurb/platform/` (paths, process launching, executable naming) and in the Tauri desktop under `desktop/`, never scattered as `if sys.platform == "win32"` through the core. That keeps the diff surface small and the merge predictable.
+
+- Upstream core (`src/nurb/`, `tests/`, `examples/`, `skills/`, `evals/`) stays upstream-compatible.
+- The Windows desktop (`desktop/src-tauri/`), the NSIS installer, the uv runtime sidecar, the signed updater channel, and the Windows CI are the fork's additions.
+- `tools/upstream_sync.py status` shows how far the fork is from upstream and classifies the changed files; `docs/windows/UPSTREAM-SYNC.md` records what a real merge does and the post-merge checklist.
+- Every intentional deviation from upstream is listed in `docs/windows/WINDOWS-PATCHES.md`.
+
+Build and release details live in `docs/windows/`: [architecture](docs/windows/ARCHITECTURE.md), [porting](docs/windows/PORTING.md), [release](docs/windows/RELEASE.md), [troubleshooting](docs/windows/TROUBLESHOOTING.md), and [upstream sync](docs/windows/UPSTREAM-SYNC.md).
+
 ## Tests
 
 `uv run pytest`. The parts in `examples/` are the calibration set, asserted against dimensions from really-printed parts. Fit tests use literal numbers, never the part's own constants: a model's tests love to agree with its code.
+
+Windows CI (`.github/workflows/windows-build.yml`) runs the Python suite, a Windows portability audit, the desktop frontend tests, and a full installer + signed updater build on every push to `main`.
 
 ## Not built yet
 
 - A hosted configurator. `nurb dev` already is one for anybody who can reach it, but publishing without a running kernel is a different problem.
 - Measurement tools in the viewer.
 - `min_wall` probes sample faces, so a pinch nothing lands near is still missed. A clean result means "no thin walls found", not "no thin walls".
+- Authenticode signing of the installer executable itself (SmartScreen). In-app updates are already signed and verified; the installer binary signature is separate and tracked in `docs/windows/RELEASE.md`.
 
 ## Debugging the viewer
 
@@ -175,6 +181,8 @@ nurb uses **Open CASCADE Technology** (OCCT) for all B-rep geometry, reached thr
 
 nurb **does** redistribute [three.js](https://threejs.org) r169 (MIT), vendored so the viewer works offline, with its `LICENSE` beside it. Same for the viewer's UI font, [JetBrains Mono](https://www.jetbrains.com/lp/mono/) (SIL OFL 1.1), vendored with its `OFL.txt`.
 
+The Windows desktop app is built with [Tauri](https://tauri.app) (MIT or Apache-2.0) and renders through Microsoft's **WebView2** runtime, which the installer bootstraps when it is missing.
+
 Other dependencies: trimesh (MIT), watchdog (Apache-2.0), websockets (BSD-3-Clause), numpy (BSD-3-Clause). Optional, for `nurb render` only: playwright (Apache-2.0).
 
-npm note: nurb has no JavaScript to ship, so PyPI is the only install channel. [`@shpigford/nurb`](https://www.npmjs.com/package/@shpigford/nurb) just points `npx` users here.
+npm note: nurb has no JavaScript to ship, so PyPI is the only CLI install channel. [`@shpigford/nurb`](https://www.npmjs.com/package/@shpigford/nurb) just points `npx` users here.
