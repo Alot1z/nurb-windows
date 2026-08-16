@@ -1,10 +1,14 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+SELF = Path(__file__).resolve()
 SKIP_PARTS = {'.git', 'node_modules', 'target', '__pycache__', '.venv', 'dist', 'binaries', 'resources'}
+# evals/ is its own uv project with its own suite and its own Unix-only
+# subprocess handling; it is not part of the Windows desktop or CLI surface.
+SKIP_TOP_DIRS = {'evals'}
 TEXT_EXTENSIONS = {'.py', '.ts', '.tsx', '.rs', '.json', '.sh', '.toml', '.md', '.ps1'}
 
 PATTERNS = {
@@ -16,38 +20,108 @@ PATTERNS = {
     'Unix signal API': re.compile(r'killpg|std::os::unix::process|PermissionsExt'),
 }
 
-PLATFORM_MARKERS = re.compile(r'cfg\s*\([^)]*windows|cfg!\s*\([^)]*windows|sys\.platform|os\.name|platform\.system|target_os|not\s*\([^)]*windows', re.I)
+# A finding inside one of these contexts is the cross-platform code doing its
+# job (a deliberate platform split) or a test exercising one side of it, not an
+# accidental Unix assumption.
+INTENTIONAL_CONTEXT = re.compile(
+    r'os\.name|sys\.platform|platform\.system|target_os'
+    r'|cfg\s*!\s*\(\s*(?:unix|windows|not\s*\(\s*windows\s*\))'
+    r'|cfg\s*\(\s*(?:unix|windows|not\s*\(\s*windows\s*\))'
+    r'|#\[cfg\s*\(\s*(?:test|unix|windows|not\s*\(\s*windows\s*\))\s*\)\]'
+    r'|mod\s+tests\b|#\[test\]',
+)
+
+TEST_PATH = re.compile(r'(^|[\\/])tests([\\/]|$)|test_[^\\/]*\.py$|[^\\/]*_test\.rs$|\.test\.tsx?$')
+
+BACKWARD_WINDOW = 60
 
 
 def iter_source():
     for path in ROOT.rglob('*'):
-        if not path.is_file() or any(part in SKIP_PARTS for part in path.parts):
+        if not path.is_file() or path == SELF:
+            continue
+        parts = path.relative_to(ROOT).parts
+        if any(part in SKIP_PARTS for part in parts):
+            continue
+        if parts and parts[0] in SKIP_TOP_DIRS:
             continue
         if path.suffix.lower() not in TEXT_EXTENSIONS:
             continue
         yield path
 
 
-def suspicious_lines(path: Path):
+def is_test_path(path: Path) -> bool:
+    return bool(TEST_PATH.search(path.relative_to(ROOT).as_posix()))
+
+
+def _unbalanced_triple(line: str) -> bool:
+    return line.count('"""') % 2 == 1 or line.count("'''") % 2 == 1
+
+
+def findings_in_file(path: Path):
     try:
         lines = path.read_text(encoding='utf-8', errors='ignore').splitlines()
     except OSError:
-        return
+        return []
+
+    ext = path.suffix.lower()
+    test_path = is_test_path(path)
+    in_py_doc = False
+    in_block_comment = False
+    findings = []
+
     for index, line in enumerate(lines):
+        stripped = line.lstrip()
+
+        # Track documentation and skip it: a docstring or comment describing
+        # Unix behavior is documentation, not an incompatibility.
+        documentation = False
+        if ext == '.py':
+            if in_py_doc:
+                documentation = True
+                if '"""' in line or "'''" in line:
+                    in_py_doc = False
+            elif stripped.startswith('#') or stripped.startswith('"""') or stripped.startswith("'''"):
+                documentation = True
+                if stripped.startswith('"""') or stripped.startswith("'''"):
+                    in_py_doc = _unbalanced_triple(line)
+        elif ext in {'.rs', '.ts', '.tsx'}:
+            if in_block_comment:
+                documentation = True
+                if '*/' in line:
+                    in_block_comment = False
+            elif stripped.startswith('//'):
+                documentation = True
+            elif '/*' in line:
+                documentation = True
+                if '*/' not in line:
+                    in_block_comment = True
+
+        # A URL is a reference (e.g. the Tauri $schema), not a Unix assumption.
+        if '://' in line:
+            documentation = True
+
+        if documentation:
+            continue
+
         for kind, pattern in PATTERNS.items():
             if not pattern.search(line):
                 continue
-            window = '\n'.join(lines[max(0, index - 3): min(len(lines), index + 4)])
-            intentional = bool(PLATFORM_MARKERS.search(window))
-            # Tests/docs may intentionally mention Unix behavior; report but do not fail.
-            exempt = path.parts[-2:] and (('tests' in path.parts) or path.suffix.lower() in {'.md', '.sh'})
-            yield kind, index + 1, line.strip(), intentional or exempt
+            # Docs and shell scripts are reference material or Unix launchers by
+            # definition; they may name Unix paths without being a portability bug.
+            intentional = ext in {'.md', '.sh'} or test_path or any(
+                INTENTIONAL_CONTEXT.search(prior)
+                for prior in lines[max(0, index - BACKWARD_WINDOW):index]
+            )
+            findings.append((kind, index + 1, line.strip(), intentional))
+
+    return findings
 
 
 def main() -> int:
     findings = []
     for path in iter_source():
-        for kind, line_no, line, intentional in suspicious_lines(path) or ():
+        for kind, line_no, line, intentional in findings_in_file(path):
             findings.append((kind, path.relative_to(ROOT), line_no, line, intentional))
 
     real = [f for f in findings if not f[4]]

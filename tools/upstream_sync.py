@@ -4,12 +4,20 @@ import subprocess
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 UPSTREAM = 'upstream'
+UPSTREAM_URL = 'https://github.com/Shpigford/nurb.git'
 SAFE_PREFIXES = ('src/nurb/', 'tests/', 'examples/', 'skills/', 'evals/')
 WINDOWS_PREFIXES = ('desktop/src-tauri/', 'desktop/scripts/', '.github/workflows/windows-')
 REVIEW_PREFIXES = ('desktop/src/', 'desktop/package.json', 'desktop/package-lock.json', 'pyproject.toml', 'uv.lock')
 
 def run(*args: str) -> str:
     return subprocess.check_output(args, cwd=ROOT, text=True).strip()
+
+
+def ensure_upstream() -> None:
+    """Add the upstream remote when it is missing, so CI checkouts (which only
+    clone origin) can still run the sync audit."""
+    if UPSTREAM not in run('git', 'remote').splitlines():
+        run('git', 'remote', 'add', UPSTREAM, UPSTREAM_URL)
 
 def classify(path: str) -> str:
     if path.startswith(WINDOWS_PREFIXES): return 'WINDOWS-SPECIFIC'
@@ -18,6 +26,7 @@ def classify(path: str) -> str:
     return 'REVIEW'
 
 def status() -> int:
+    ensure_upstream()
     run('git', 'fetch', UPSTREAM, 'main', '--prune')
     local = run('git', 'rev-parse', 'HEAD')
     remote = run('git', 'rev-parse', f'{UPSTREAM}/main')
