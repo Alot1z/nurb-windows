@@ -766,6 +766,31 @@ def test_desktop_app_version_is_the_package_version():
     assert conf["version"] == version
 
 
+def test_the_updater_never_points_at_upstream_nurb():
+    """A merge of an upstream desktop change once silently reverted the updater
+    endpoint to Shpigford/nurb's release channel, which would have made every
+    installed app fetch upstream's unsigned metadata. The endpoint and the
+    embedded pubkey must match the fork and the committed public key, or this
+    test goes red."""
+    import base64
+    import json
+
+    repo = pathlib.Path(__file__).parents[1]
+    conf = json.loads((repo / "desktop" / "src-tauri" / "tauri.conf.json").read_text(encoding="utf-8"))
+    endpoints = conf["plugins"]["updater"]["endpoints"]
+    assert endpoints, "the updater must have an endpoint"
+    for endpoint in endpoints:
+        assert "Shpigford/nurb" not in endpoint, f"updater endpoint points at upstream: {endpoint}"
+        assert "Alot1z/nurb-windows" in endpoint, f"updater endpoint is not the fork's: {endpoint}"
+    # The embedded pubkey is base64 of the minisign text file, and the
+    # committed .pub is the same base64; the two must match exactly so the
+    # installed app verifies against the key the release signs with.
+    pubkey = conf["plugins"]["updater"]["pubkey"]
+    base64.b64decode(pubkey)  # raises on a malformed key
+    committed = (repo / "desktop" / "signing" / "tauri-updater.key.pub").read_text(encoding="utf-8").strip()
+    assert pubkey == committed, "tauri.conf.json pubkey does not match desktop/signing/tauri-updater.key.pub"
+
+
 def test_skill_sync_rewrites_a_stale_copy_and_writes_the_shared_one_once(tmp_path, monkeypatch, capsys):
     """skills.sh symlinks every harness at one universal copy; sync must not report it twice."""
     monkeypatch.setenv("HOME", str(tmp_path))
