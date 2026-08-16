@@ -30,6 +30,11 @@ jobs:
         run: uv python install 3.13
       - name: Install Python dependencies
         run: uv sync --locked --all-extras --dev
+      # `nurb render` is the one command that wants a browser, and the extra
+      # installs playwright without one. Without this the render tests do not
+      # skip, they fail.
+      - name: Install the render browser
+        run: uv run playwright install chromium
       - name: Windows portability audit
         run: uv run python tools/audit_windows.py
       - name: Python tests

@@ -52,7 +52,7 @@ class Unavailable(Exception):
 
 
 def _windows_install_roots():
-    """The directories the Windows installers put these apps in.
+    r"""The directories the Windows installers put these apps in.
 
     Both slicers install per-user under %LOCALAPPDATA%\Programs by default;
     machine-wide installs land under Program Files. Each app's own directory
