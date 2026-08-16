@@ -25,6 +25,7 @@ This file records intentional downstream changes found in the current working tr
 
 ## Desktop identity and UX
 
+- `pyproject.toml` `[project.urls]` names the fork (`Alot1z/nurb-windows`) as Repository/Issues and keeps upstream as a separate `Upstream` link, so packaging metadata and bug reports land on the fork. Merge strategy: take the fork side on `pyproject.toml` conflicts; it does not affect the uv lock.
 - Windows removes macOS overlay-titlebar behavior and DMG packaging.
 - Project-name validation rejects `\\` on Windows.
 - About/help links point at `Alot1z/nurb-windows`.

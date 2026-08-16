@@ -1,34 +1,32 @@
 # nurb desktop
 
-A Tauri shell around nurb: project rail, agent chat column, and the live viewer in one window.
+A Tauri shell around nurb: project rail, agent chat column, and the live viewer in one window. This is the Windows desktop half of the nurb-windows fork.
 
 ## Dev setup
 
-Rust toolchain, Node 22+, uv, and Xcode command line tools. Then:
+Windows 10/11 x64, the Rust toolchain with the MSVC target, Node 22+, uv, and Python 3.13. Then:
 
 ```
 npm install
 npm run tauri dev
 ```
 
-Debug builds run nurb out of this checkout (`uv run --project <repo> nurb dev`) and the ACP adapters through PATH `npx`, so nothing needs provisioning. `cargo test` inside `src-tauri/` needs `scripts/stage.sh` to have run once (the build script wants the uv sidecar); any `tauri dev` or `tauri build` runs it for you.
+Debug builds run nurb out of this checkout (`uv run --project <repo> nurb dev`) and the ACP adapters through PATH `npx`, so nothing needs provisioning. `cargo test` inside `src-tauri/` needs `scripts/stage.py` to have run once (the build script wants the uv sidecar); any `tauri dev` or `tauri build` runs it for you.
 
 ## Provisioning model
 
-Release builds never touch the dev environment. On first launch the app provisions everything into its app data directory (`~/Library/Application Support/dev.nurb.desktop`):
+Release builds never touch the dev environment. On first launch the app provisions everything into its app data directory (`%APPDATA%\dev.alot1z.nurb.windows`):
 
-- `python/`, `env/`: a managed CPython and a venv holding the bundled nurb wheel plus its hash-pinned lock, installed by the bundled uv sidecar.
-- `node/`, `adapters/`: the pinned Node LTS (downloaded from nodejs.org, checksum-verified) and the Claude and Codex ACP adapters, installed on the user's machine with `npm ci` from a committed integrity lock. The adapters are deliberately not bundled: the Claude Code binary inside `@anthropic-ai/claude-agent-sdk` is all-rights-reserved and must not be redistributed. Cursor and Grok speak ACP natively and are never provisioned at all: the app finds the CLI the vendor's own installer put on the machine (`~/.local/bin/agent`, `~/.grok/bin/grok`, then PATH). Until it exists the agent stays out of the rail; the rail's "need another agent?" help lists the missing ones with their installers.
+- `python/`, `env/`: a managed CPython and a venv holding the bundled nurb wheel plus its hash-pinned lock, installed by the bundled uv sidecar (`binaries/uv/uv.exe` on Windows).
+- `node/`, `adapters/`: the pinned Node LTS (downloaded from nodejs.org, checksum-verified) and the Claude and Codex ACP adapters, installed with `npm ci` from a committed integrity lock. The adapters are deliberately not bundled: the Claude Code binary inside `@anthropic-ai/claude-agent-sdk` is all-rights-reserved and must not be redistributed. Cursor and Grok speak ACP natively and are never provisioned at all: the app finds the CLI the vendor's own installer put on the machine, then PATH.
 - `provisioned.json`: what was installed, compared per component on every launch. A changed wheel payload, Python lock, Node version, or adapter lock redoes only its own component; a broken venv is deleted and rebuilt.
 
-`scripts/stage.sh` stages the bundle inputs before every build: the nurb wheel from this checkout, a `uv pip compile --universal --generate-hashes` lock, the committed adapter manifest and lock, and the uv binaries for both darwin targets (skipped once downloaded).
+`scripts/stage.py` stages the bundle inputs before every build, cross-platform: the nurb wheel from this checkout, a hash-pinned uv lock, the committed adapter manifest and lock, and the checksum-verified uv binary for the target platform.
 
 Debug-build test overrides, never compiled into release: `NURB_DESKTOP_PROVISIONED=1` makes a debug build use the provisioned environment, and `NURB_DESKTOP_DATA=<dir>` points the whole app (registry, sessions, provisioned env) at a scratch directory.
 
 ## Release
 
-The engine and the app share one version and one release: `uv version X.Y.Z` at the repo root, the matching `version` in `src-tauri/tauri.conf.json` (a test enforces they agree, alongside the skill files), merge, then run `scripts/release.sh`. publish.yml handles PyPI and creates the `vX.Y.Z` release on merge; the script builds the desktop half for Apple silicon and Intel, signed and notarized (credentials from `desktop/.env`, see `.env.example`), verifies each chain (`codesign --verify --deep --strict`, `spctl --assess`, `stapler validate`), uploads `nurb.dmg` for Apple silicon and `nurb-intel.dmg` for Intel Macs plus target-specific updater archives, and refreshes `latest.json` on the rolling `desktop-latest` prerelease that installed apps poll. It refuses to upload twice for one version.
+The engine and the app share one version. `windows-release.yml` builds the signed NSIS installer (`nurb_<version>_x64-setup.exe`), its updater signature, and the `latest.json` updater manifest on the `vX.Y.Z` tag, and attaches them to the fork's GitHub release. In-app updates are signed with an Ed25519 keypair: the public key is committed and embedded in the app, and the private key lives only in the repository secrets `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. Losing that private key means shipped apps can never update again. See `docs/windows/RELEASE.md` for the full ceremony.
 
-Updates are signed with the key from `tauri signer generate` (path in `.env`; the public key lives in `tauri.conf.json`). Losing that private key means shipped apps can never update again.
-
-Releases run from a Mac with the Developer ID certificate in the keychain, the same way the other Sabotage Media apps ship; there is no CI signing. The script builds `aarch64-apple-darwin` and `x86_64-apple-darwin`. `latest.json` carries both updater entries, so installed apps receive the archive for their architecture.
+macOS and Linux remain supported by the shared core, but their desktop packaging and notarization are upstream's flow; this fork's desktop release pipeline is Windows.
