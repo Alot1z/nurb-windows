@@ -48,6 +48,18 @@ every probe with no explanation. The error message now says what to do (retry
 or relaunch) instead of misreporting a missing CLI when any of the five probes
 (node, both adapters, both native CLIs) was the actual failure.
 
+## Shipped agent docs name both platforms
+
+`src/nurb/doctrine.md`, `src/nurb/agents.md`, `src/nurb/skill.md`, and
+`skills/nurb/SKILL.md` now name the per-user config file as
+`%APPDATA%\nurb\config.toml` on Windows (with `~/.config/nurb/config.toml`
+elsewhere) and the launcher as `viewer.cmd` on Windows, instead of Unix-only
+paths. Without this, a Windows agent followed the skill and wrote its standing
+answers to a directory nurb never reads. The wording is platform-neutral so it
+is an upstream-compatible change, but it does touch the four SAFE-category
+files; the one-body test (`test_the_skill_is_the_shim_with_a_trigger_on_top`)
+keeps skill.md, SKILL.md, and the agents.md body from drifting.
+
 ## Windows-only Python fixes worth remembering
 
 - `src/nurb/platform/paths.py` `home_dir()` honors `HOME` even on Windows, where `pathlib.Path.home()` only reads `USERPROFILE`. This is what makes the skill-install tests (which monkeypatch `HOME`) pass, and it is the right semantic for agents that set `HOME` to stage a skill.
