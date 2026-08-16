@@ -419,13 +419,21 @@ fn test_hook(app: AppHandle) {
     });
 }
 
-/// Windows ships no app menu; the Help items live in the app's About box
-/// instead, so this is a no-op on Windows. Kept as a hook so a menu can return
-/// on platforms that want one without threading conditionals through run().
+/// macOS ships an empty Help submenu, and a chromeless window has nowhere else
+/// to put a link. "Check for Updates…" sits under About where every Mac app
+/// keeps it; the webview owns the update state, so the click is forwarded
+/// there as an event (Windows users get the same action from the rail's
+/// "check for updates" button).
 #[cfg(target_os = "macos")]
 fn install_menu(app: &AppHandle) -> tauri::Result<()> {
     use tauri::menu::{Menu, MenuItem, HELP_SUBMENU_ID};
     let menu = Menu::default(app)?;
+    if let Some(appmenu) = menu.items()?.first().and_then(|i| i.as_submenu().cloned()) {
+        appmenu.insert(
+            &MenuItem::with_id(app, "app:check-updates", "Check for Updates…", true, None::<&str>)?,
+            1,
+        )?;
+    }
     if let Some(help) = menu.get(HELP_SUBMENU_ID).and_then(|i| i.as_submenu().cloned()) {
         help.append_items(&[
             &MenuItem::with_id(app, "help:github", "nurb on GitHub", true, None::<&str>)?,
@@ -434,8 +442,13 @@ fn install_menu(app: &AppHandle) -> tauri::Result<()> {
     }
     app.set_menu(menu)?;
     app.on_menu_event(|app, event| {
+        use tauri::Emitter;
         use tauri_plugin_opener::OpenerExt;
         let url = match event.id().as_ref() {
+            "app:check-updates" => {
+                let _ = app.emit("menu:check-updates", ());
+                return;
+            }
             "help:github" => "https://github.com/Alot1z/nurb-windows",
             "help:issue" => "https://github.com/Alot1z/nurb-windows/issues/new",
             _ => return,
@@ -457,6 +470,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(acp::Chats::new())
         .manage(agents::Logins::new())
         .manage(provision::Provisioner::new())
@@ -644,5 +658,32 @@ mod tests {
             Some("session-1")
         );
         assert_eq!(super::acp::session_to_remove(&Ok(None), &live), None);
+    }
+
+    // The updater pubkey in tauri.conf.json is base64 of the minisign text
+    // file. Decoding and parsing it here proves the committed key is well
+    // formed and that the updater plugin will accept it at runtime; a stray
+    // edit that breaks the update channel fails this test instead of shipping.
+    #[test]
+    fn the_committed_updater_pubkey_decodes_for_minisign_verify() {
+        use base64::Engine;
+        let conf: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let pubkey = conf["plugins"]["updater"]["pubkey"].as_str().unwrap();
+        let decoded = String::from_utf8(
+            base64::engine::general_purpose::STANDARD
+                .decode(pubkey.as_bytes())
+                .unwrap(),
+        )
+        .unwrap();
+        let key = minisign_verify::PublicKey::decode(&decoded).unwrap();
+        // The minisign key blob is b"Ed" + 8-byte key id + 32-byte key, and
+        // from_base64 parses exactly that raw form.
+        let blob = base64::engine::general_purpose::STANDARD
+            .decode(decoded.lines().nth(1).unwrap())
+            .unwrap();
+        assert_eq!(&blob[..2], b"Ed");
+        assert_eq!(blob.len(), 42);
+        let _ = minisign_verify::PublicKey::from_base64(&decoded.lines().nth(1).unwrap()).unwrap();
+        assert!(key.untrusted_comment().is_some());
     }
 }

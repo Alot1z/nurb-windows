@@ -16,9 +16,9 @@ The desktop process layer uses Windows process-tree termination. Inspect child p
 
 Use `nurb slice` with a configured printer and either put the slicer on `PATH`, install it under a standard Windows application location, or configure an explicit executable path when the application exposes that setting.
 
-## Updates are unavailable
+## Updates do not arrive
 
-This is currently intentional while the fork's signed updater channel is being established. Never point the Windows application at upstream nurb release metadata.
+The updater checks the fork's `releases/latest/download/latest.json` every six hours and on launch, and the rail shows a "check for updates" button. A missing update usually means the release has no `latest.json` asset (the windows-release workflow publishes it), the app version is already newest, or the endpoint was unreachable and the failure was silent by design. Confirm the app is a release build (dev builds never check) and that `TAURI_SIGNING_PRIVATE_KEY`/`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secrets exist for the release build. The endpoint is pinned to Alot1z/nurb-windows; never point it at upstream nurb metadata.
 
 ## Paths containing spaces or Unicode
 

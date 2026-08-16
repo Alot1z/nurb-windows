@@ -1,0 +1,63 @@
+name: windows-release
+
+# Builds the signed Windows installer and updater artifacts for a release,
+# attaches them to the GitHub release the publish workflow created, and
+# uploads the static latest.json that the installed app's updater endpoint
+# (`releases/latest/download/latest.json`) serves.
+#
+# Runs on the vX.Y.Z tag created by the publish workflow on a version bump.
+# Requires two repository secrets, one per environment that builds:
+#   TAURI_SIGNING_PRIVATE_KEY           the updater private key contents
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  the key's password
+# The matching public key is committed (desktop/signing/tauri-updater.key.pub)
+# and embedded in the app via tauri.conf.json, so the app can verify the
+# signatures these artifacts carry. Never point this at upstream nurb's
+# release channel; the endpoint is pinned to Alot1z/nurb-windows.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      # The build's beforeBuildCommand runs desktop/scripts/stage.py, which
+      # needs uv to build the wheel and compile the requirements lock.
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Build signed Windows installer and updater artifacts
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: desktop
+          tagName: ${{ github.ref_name }}
+          releaseName: ${{ github.ref_name }}
+          releaseBody: "See the GitHub release for details."
+          releaseDraft: false
+          prerelease: false
+          target: x86_64-pc-windows-msvc
+          # Publish the static latest.json to the release; the installed app's
+          # updater endpoint is pinned to that file on Alot1z/nurb-windows.
+          uploadUpdaterJson: true
+          updaterJsonPreferNsis: true

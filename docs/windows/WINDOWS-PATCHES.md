@@ -32,9 +32,7 @@ This file records intentional downstream changes found in the current working tr
 
 ## Release/update security
 
-The inherited upstream updater was removed entirely because it pointed at `Shpigford/nurb` and shipped a hard-coded `pubkey` in the bundle config. The Windows fork must never silently update itself from the upstream project's release channel. The removal is complete and consistent: `tauri-plugin-updater` is gone from `Cargo.toml`, `src/lib.rs`, `capabilities/default.json`, and `tauri.conf.json`; the npm package is out of `package.json`/`package-lock.json`; the frontend's check/download/install flow is gone from `App.tsx`; and the Rust `Check for Updates…` menu item is now macOS-only (`install_menu` is a no-op on Windows). The app builds and runs with no updater surface, which degrades gracefully: there is simply no update UI.
-
-Reintroduce updating only with a dedicated `Alot1z/nurb-windows` release endpoint and a real signing keypair (private key as a CI secret, public key in `tauri.conf.json`). Until then, no updater is the security-correct state; see `docs/windows/RELEASE.md` for the full path.
+The inherited upstream updater was removed and replaced with a fork-owned channel: the plugin now points only at `Alot1z/nurb-windows` releases (`latest.json` on the fork's releases), signed by a fork keypair whose public key is committed (`desktop/signing/tauri-updater.key.pub` -> `tauri.conf.json` `plugins.updater.pubkey`) and whose private key exists only as a CI secret plus a gitignored local copy. The Windows surface is the rail's "check for updates" button; the macOS "Check for Updates…" menu item forwards to the same flow. `.github/workflows/windows-release.yml` builds the signed installer on the `v*` tag and publishes the installer, `.sig`, and `latest.json` to the fork's release. Builds fail loudly when the signing key is absent, so an unsigned update channel cannot ship. See `docs/windows/RELEASE.md` for the secret setup.
 
 ## Windows-only Python fixes worth remembering
 

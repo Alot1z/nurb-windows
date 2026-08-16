@@ -23,6 +23,7 @@ tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-process = "2"
+tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"
@@ -32,6 +33,9 @@ tokio = { version = "1", features = ["rt", "process", "io-util", "sync", "macros
 async-process = "2"
 futures-lite = "2"
 sha2 = "0.10"
+# Updater signature verification, shared with tauri-plugin-updater; the test
+# suite uses it to prove the committed pubkey parses for the real verifier.
+minisign-verify = "0.2"
 # Part deletion goes through the Trash, never rm: it is the one place the app
 # destroys user work, so it has to be recoverable.
 trash = "5"
