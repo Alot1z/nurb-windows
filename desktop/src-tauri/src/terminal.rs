@@ -293,6 +293,22 @@ mod tests {
     #[test]
     fn terminal_round_trips_bytes() {
         let (exe, args) = shell_echo_command();
+        // The echo child is Python. On a bare CI runner without python on
+        // PATH the test would fail for the wrong reason, so skip with a note
+        // instead; the ConPTY machinery is still exercised everywhere python
+        // exists (dev machines, the usual Windows CI images).
+        if std::process::Command::new(&exe)
+            .arg("--version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+            == false
+        {
+            eprintln!("skipping round-trip test: no python on PATH");
+            return;
+        }
         let pty_system = native_pty_system();
         let pair = pty_system
             .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
