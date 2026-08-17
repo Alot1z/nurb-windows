@@ -43,6 +43,10 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
 
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm ci
+
       - name: Build signed Windows installer and updater artifacts
         uses: tauri-apps/tauri-action@v0
         env:
@@ -56,8 +60,10 @@ jobs:
           releaseBody: "See the GitHub release for details."
           releaseDraft: false
           prerelease: false
-          target: x86_64-pc-windows-msvc
+          # The runner is windows-latest, but say the target out loud so the
+          # intended platform is recorded in the workflow.
+          args: --target x86_64-pc-windows-msvc
           # Publish the static latest.json to the release; the installed app's
           # updater endpoint is pinned to that file on Alot1z/nurb-windows.
-          uploadUpdaterJson: true
+          includeUpdaterJson: true
           updaterJsonPreferNsis: true
