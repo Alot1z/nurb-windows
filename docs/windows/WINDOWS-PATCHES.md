@@ -35,6 +35,17 @@ This file records intentional downstream changes found in the current working tr
 
 The inherited upstream updater was removed and replaced with a fork-owned channel: the plugin now points only at `Alot1z/nurb-windows` releases (`latest.json` on the fork's releases), signed by a fork keypair whose public key is committed (`desktop/signing/tauri-updater.key.pub` -> `tauri.conf.json` `plugins.updater.pubkey`) and whose private key exists only as a CI secret plus a gitignored local copy. The Windows surface is the rail's "check for updates" button; the macOS "Check for Updates…" menu item forwards to the same flow. `.github/workflows/windows-release.yml` builds the signed installer on the `v*` tag and publishes the installer, `.sig`, and `latest.json` to the fork's release. Builds fail loudly when the signing key is absent, so an unsigned update channel cannot ship. See `docs/windows/RELEASE.md` for the secret setup.
 
+## Extension system (developer-only  pair)
+
+New fork-owned capability, additive to the desktop and Python layers; upstream `src/nurb` behavior is unchanged except one new subcommand.
+
+- `desktop/src-tauri/src/extensions.rs`: generic extension registry (manifests, declarative lookups, enable/disable state, version gate).  CLI and  Desktop are the first two entries, both developer-only and disabled by default.
+- `desktop/src-tauri/src/terminal.rs`: ConPTY/pty terminal host via `portable-pty` (new dependency, added to `Cargo.toml`). Byte-only transport: user keystrokes in, child output out, no parsing, no injection. Spawns only registered extension manifests with `--cwd <project>` as the single substitution.
+- `desktop/src-tauri/src/lib.rs`: new commands (`extension_statuses`, `set_extension_enabled`, `open_terminal_extension`, `launch_external_extension`, `terminal_input`, `terminal_resize`, `terminal_close`) and shutdown cleanup.
+- `desktop/src/TerminalPanel.tsx` (xterm.js, `xterm` + `@xterm/addon-fit` added to `desktop/package.json`), `desktop/src/ExtensionsModal.tsx`, rail entry in `App.tsx`, styles in `App.css`.
+- `src/nurb/mcp.py` + `nurb mcp` subcommand in `src/nurb/cli.py`: a stdio MCP server whose tools are the CLI commands themselves (same argparse Namespace, same `cmd_*` functions, output captured). `tests/test_mcp.py` drives it as a real subprocess. Merge strategy for `cli.py`: additive subparser only, no changes to existing commands.
+- The  pair is developer-only and off by default until the written-permission questions in `docs/windows/-INTEGRATION.md` section 27 are answered; nothing in the extension system itself depends on that.
+
 ## Upstream publish workflow removed from the fork
 
 `.github/workflows/publish.yml` (inherited from upstream) was deleted. It is upstream's release ceremony: on a version bump it publishes the `nurb` wheel to PyPI over trusted publishing and creates the GitHub release. On the fork it cannot work and does harm: the fork's `pypi` environment is not a PyPI publisher for Shpigford's project, so a version bump makes a red run; and the "already on PyPI, tagging only" path created source-only releases with no assets and no notes, which is exactly the misleading `v0.20.0` release on the fork. The fork's release flow is one workflow: push the `vX.Y.Z` tag, and `.github/workflows/windows-release.yml` builds the signed installer and updater artifacts and creates the release with real assets. If the fork ever needs its own PyPI publishing, that belongs in a new fork-owned workflow, not a revived copy of upstream's.

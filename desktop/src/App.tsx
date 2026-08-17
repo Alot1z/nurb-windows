@@ -8,6 +8,8 @@ import { check, Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import About from "./About";
 import AgentsHelp from "./AgentsHelp";
+import ExtensionsModal, { type ExtensionStatus } from "./ExtensionsModal";
+import TerminalPanel from "./TerminalPanel";
 import Chat, { AGENT_LABEL, PROJECT_CHAT } from "./Chat";
 import {
   chatKey,
@@ -245,10 +247,22 @@ function App() {
   const [showAbout, setShowAbout] = useState(false);
   const [showAgentsHelp, setShowAgentsHelp] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  // Developer-only extension surface: experimental integrations the app can
+  // host ( CLI in a terminal) or launch ( Desktop). Off by
+  // default and absent from the normal feature set.
+  const [extStatuses, setExtStatuses] = useState<ExtensionStatus[]>([]);
+  const [showExtensions, setShowExtensions] = useState(false);
+  const [terminalExt, setTerminalExt] = useState<ExtensionStatus | null>(null);
   const [defaultProjectsFolder, setDefaultProjectsFolder] = useState<string | null>(null);
   const [projectsFolder, setProjectsFolder] = useState<string | null>(
     () => localStorage.getItem(PROJECTS_FOLDER_KEY),
   );
+
+  const refreshExtensions = useCallback(() => {
+    invoke<ExtensionStatus[]>("extension_statuses")
+      .then(setExtStatuses)
+      .catch(() => {});
+  }, []);
   // The update this run found. null until the first check settles, so the rail
   // never flashes a button. The update downloads eagerly once found, so the
   // restart is instant; a failed background download makes `ready` resolve
@@ -1174,6 +1188,16 @@ function App() {
         )}
         {error && <div className="rail-error">{error}</div>}
         <div className="rail-foot">
+          <button
+            className="rail-version"
+            title="experimental developer extensions"
+            onClick={() => {
+              refreshExtensions();
+              setShowExtensions(true);
+            }}
+          >
+            developer extensions
+          </button>
           <button className="rail-version" onClick={() => setShowSettings(true)}>
             settings
           </button>
@@ -1275,6 +1299,26 @@ function App() {
             // the next launch.
             refreshAgents();
           }}
+        />
+      )}
+      {showExtensions && (
+        <ExtensionsModal
+          statuses={extStatuses}
+          projectDir={active}
+          onChanged={refreshExtensions}
+          onOpenTerminal={(ext) => {
+            setShowExtensions(false);
+            setTerminalExt(ext);
+          }}
+          onClose={() => setShowExtensions(false)}
+        />
+      )}
+      {terminalExt && active && (
+        <TerminalPanel
+          id={terminalExt.id}
+          label={terminalExt.label}
+          projectDir={active}
+          onClose={() => setTerminalExt(null)}
         />
       )}
       {/* One column per opened chat, all mounted so background turns keep

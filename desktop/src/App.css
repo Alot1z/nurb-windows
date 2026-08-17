@@ -1678,3 +1678,57 @@ textarea {
   padding: 8px 10px;
   margin: 0 0 14px;
 }
+
+/* The developer extension surface: the  CLI terminal host and the
+   extension cards. Everything here is opt-in and off by default. */
+.terminal-card {
+  width: min(720px, calc(100vw - 80px));
+  height: min(480px, calc(100vh - 120px));
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.terminal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.terminal-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.terminal-error {
+  padding: 8px 14px;
+  color: #e5484d;
+  font-size: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.terminal-host {
+  flex: 1;
+  min-height: 0;
+  padding: 6px;
+  background: #141414;
+}
+
+.ext-chips {
+  display: flex;
+  gap: 6px;
+  margin: 4px 0;
+}
+
+.tag-off {
+  opacity: 0.5;
+}
+
+.ext-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
