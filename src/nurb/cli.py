@@ -271,9 +271,8 @@ def _artifact_size(path):
 
 
 def cmd_mcp(args):
-    """Run the MCP stdio server so an MCP-capable agent ('s CLI, for
-    one) can call nurb's own commands. The tools are the CLI commands; see
-    mcp.py for the boundaries."""
+    """Run the MCP stdio server so an MCP-capable agent can call nurb's own
+    commands. The tools are the CLI commands; see mcp.py for the boundaries."""
     from . import mcp
 
     mcp.main(["--project", args.project] if args.project else [])
