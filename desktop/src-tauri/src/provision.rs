@@ -821,8 +821,13 @@ mod tests {
     #[test]
     fn health_probe_requires_the_expected_version_and_cannot_hang() {
         let dir = std::env::temp_dir();
-        assert!(probe_version(echo("adapter 1.2.3"), &dir, "1.2.3", Duration::from_secs(1)));
-        assert!(!probe_version(echo("9.9.9"), &dir, "1.2.3", Duration::from_secs(1)));
+        // Three seconds, not one: a `cmd /C echo` on a busy CI box (or this
+        // machine mid-build) can exceed a tight budget even though the probe
+        // itself is healthy. The cannot-hang half below still uses a tiny
+        // timeout, so the guard is what this test actually proves.
+        let budget = Duration::from_secs(3);
+        assert!(probe_version(echo("adapter 1.2.3"), &dir, "1.2.3", budget));
+        assert!(!probe_version(echo("9.9.9"), &dir, "1.2.3", budget));
         assert!(!probe_version(
             sleep(5),
             &dir,
