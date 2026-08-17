@@ -19,3 +19,7 @@ wheels/
 
 # Scratch project the MCP server tests build parts in
 tests/_scratch_mcp/
+
+# Freebuff private development docs
+docs/windows/FREEBUFF-INTEGRATION.md
+docs/windows/FREEBUFF-PERMISSION-REQUEST.md
