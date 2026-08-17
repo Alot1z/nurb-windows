@@ -1,12 +1,14 @@
 mod acp;
 mod agents;
 mod env;
+mod extensions;
 mod prefs;
 mod process;
 mod provision;
 mod registry;
 mod sessions;
 mod supervisor;
+mod terminal;
 
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -490,6 +492,8 @@ pub fn run() {
             app.manage(Registry::load(&dir));
             app.manage(sessions::SessionStore::load(&dir));
             app.manage(prefs::PrefStore::load(&dir));
+            app.manage(std::sync::Mutex::new(extensions::Extensions::load(&dir)));
+            app.manage(terminal::Terminals::default());
             install_menu(app.handle())?;
             #[cfg(debug_assertions)]
             test_hook(app.handle().clone());
@@ -518,6 +522,13 @@ pub fn run() {
             acp::close_chat,
             agents::agent_statuses,
             agents::agent_login,
+            terminal::extension_statuses,
+            terminal::set_extension_enabled,
+            terminal::open_terminal_extension,
+            terminal::launch_external_extension,
+            terminal::terminal_input,
+            terminal::terminal_resize,
+            terminal::terminal_close,
             provision::provision_status,
             provision::provision,
             provision::about_info
@@ -530,6 +541,7 @@ pub fn run() {
                 app.state::<acp::Chats>().shutdown();
                 app.state::<agents::Logins>().shutdown();
                 app.state::<provision::Provisioner>().shutdown();
+                app.state::<terminal::Terminals>().shutdown();
             }
         });
 }

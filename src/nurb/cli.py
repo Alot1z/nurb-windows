@@ -270,6 +270,15 @@ def _artifact_size(path):
     return f"{n / 1e6:.1f}MB" if n >= 1e6 else f"{n / 1e3:.0f}kB"
 
 
+def cmd_mcp(args):
+    """Run the MCP stdio server so an MCP-capable agent ('s CLI, for
+    one) can call nurb's own commands. The tools are the CLI commands; see
+    mcp.py for the boundaries."""
+    from . import mcp
+
+    mcp.main(["--project", args.project] if args.project else [])
+
+
 def cmd_export(args):
     from build123d import export_step
 
@@ -1394,6 +1403,10 @@ def main(argv=None):
         help=f"default: {' '.join(DEFAULT_FORMATS)}, or printer.toml's [export] formats. also: stl, step, glb",
     )
     s.set_defaults(fn=cmd_export)
+
+    s = sub.add_parser("mcp", help="serve nurb's commands over the Model Context Protocol (stdio)")
+    s.add_argument("--project", help="the nurb project to serve (default: the nearest project from cwd)")
+    s.set_defaults(fn=cmd_mcp)
 
     args = p.parse_args(argv)
     args.fn(args)
