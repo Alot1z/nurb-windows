@@ -35,6 +35,10 @@ This file records intentional downstream changes found in the current working tr
 
 The inherited upstream updater was removed and replaced with a fork-owned channel: the plugin now points only at `Alot1z/nurb-windows` releases (`latest.json` on the fork's releases), signed by a fork keypair whose public key is committed (`desktop/signing/tauri-updater.key.pub` -> `tauri.conf.json` `plugins.updater.pubkey`) and whose private key exists only as a CI secret plus a gitignored local copy. The Windows surface is the rail's "check for updates" button; the macOS "Check for Updates…" menu item forwards to the same flow. `.github/workflows/windows-release.yml` builds the signed installer on the `v*` tag and publishes the installer, `.sig`, and `latest.json` to the fork's release. Builds fail loudly when the signing key is absent, so an unsigned update channel cannot ship. See `docs/windows/RELEASE.md` for the secret setup.
 
+## Upstream publish workflow removed from the fork
+
+`.github/workflows/publish.yml` (inherited from upstream) was deleted. It is upstream's release ceremony: on a version bump it publishes the `nurb` wheel to PyPI over trusted publishing and creates the GitHub release. On the fork it cannot work and does harm: the fork's `pypi` environment is not a PyPI publisher for Shpigford's project, so a version bump makes a red run; and the "already on PyPI, tagging only" path created source-only releases with no assets and no notes, which is exactly the misleading `v0.20.0` release on the fork. The fork's release flow is one workflow: push the `vX.Y.Z` tag, and `.github/workflows/windows-release.yml` builds the signed installer and updater artifacts and creates the release with real assets. If the fork ever needs its own PyPI publishing, that belongs in a new fork-owned workflow, not a revived copy of upstream's.
+
 ## Chat runtime health check (Windows hardening)
 
 `provision.rs` health probes now retry once after a short pause: a freshly

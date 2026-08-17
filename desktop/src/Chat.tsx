@@ -64,6 +64,7 @@ export const AGENT_LABEL: Record<string, string> = {
   codex: "Codex",
   cursor: "Cursor",
   grok: "Grok",
+  freebuff: "Freebuff",
 };
 
 const TOOL_STATUS_LABEL: Record<string, string> = {

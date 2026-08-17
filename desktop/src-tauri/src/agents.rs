@@ -10,6 +10,12 @@
 //! vendor's own installer put on the machine. Signing in through the app
 //! shares credentials with any terminal install either way, because every
 //! agent reads its own store (~/.claude, ~/.codex, Cursor's, ~/.grok).
+//!
+//! EXTERNAL below is a third category: CLIs that exist and install in one
+//! line but speak no ACP, so the app cannot drive them yet. They are listed
+//! in the "need another agent?" help with their installer and an honest
+//! note, and never appear in the rail or accept a login, because claiming to
+//! host them would be a lie the app would fail at on first use.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -139,6 +145,30 @@ impl AgentKind {
     }
 }
 
+/// A CLI the help modal mentions but the app cannot drive: it installs in
+/// one line but speaks no Agent Client Protocol, so there is no bridge to
+/// run it in the app. Listing it is honest about what exists; the note says
+/// the app cannot host it yet, so nobody installs it expecting the rail.
+/// An id here must NOT parse as an AgentKind, which is what stops a login or
+/// session from ever trying to spawn it.
+pub struct ExternalAgent {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub note: &'static str,
+    pub install: &'static str,
+}
+
+/// Freebuff (freebuff.com) is a free coding agent with an npm CLI. As of
+/// this writing it has no ACP interface, so unlike the four agents above it
+/// cannot be driven in the app; the help entry teaches the user it exists
+/// and how to install it, and says plainly that it runs in the terminal.
+pub const EXTERNAL: [ExternalAgent; 1] = [ExternalAgent {
+    id: "freebuff",
+    label: "Freebuff",
+    note: "is a free coding agent for your terminal. It does not speak the Agent Client Protocol yet, so nurb cannot drive it in the app; install it and use it from the terminal.",
+    install: "npm install -g freebuff",
+}];
+
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentStatus {
@@ -197,6 +227,20 @@ pub async fn agent_statuses(app: tauri::AppHandle) -> Vec<AgentStatus> {
             note: agent.subscription_note(),
             install: agent.install_command(),
         }));
+    }
+    // The help-only agents: never installed, never logged in, one-line
+    // installer, honest note. The rail filters on `installed`, so these live
+    // exactly where they belong, in the "need another agent?" modal.
+    for agent in EXTERNAL {
+        statuses.push(AgentStatus {
+            id: agent.id,
+            label: agent.label,
+            installed: false,
+            logged_in: None,
+            detail: None,
+            note: agent.note,
+            install: Some(agent.install),
+        });
     }
     statuses
 }
@@ -384,6 +428,21 @@ mod tests {
         for agent in super::ALL {
             assert_eq!(agent.adapter().is_some(), agent.native_command().is_none());
             assert_eq!(agent.adapter().is_some(), agent.adapter_bin().is_some());
+        }
+    }
+
+    /// The help-only agents must never be spawnable: parsing their id fails,
+    /// so a login or session cannot launch a CLI the app has no bridge for.
+    #[test]
+    fn external_agents_are_help_only_and_never_spawnable() {
+        assert!(!super::EXTERNAL.is_empty());
+        for agent in super::EXTERNAL {
+            assert!(
+                AgentKind::parse(agent.id).is_err(),
+                "{} must not parse as a spawnable agent",
+                agent.id
+            );
+            assert!(agent.install.contains("npm") || agent.install.contains("irm"));
         }
     }
 
