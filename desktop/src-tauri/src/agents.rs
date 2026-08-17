@@ -158,16 +158,11 @@ pub struct ExternalAgent {
     pub install: &'static str,
 }
 
-/// Freebuff (freebuff.com) is a free coding agent with an npm CLI. As of
-/// this writing it has no ACP interface, so unlike the four agents above it
-/// cannot be driven in the app; the help entry teaches the user it exists
-/// and how to install it, and says plainly that it runs in the terminal.
-pub const EXTERNAL: [ExternalAgent; 1] = [ExternalAgent {
-    id: "freebuff",
-    label: "Freebuff",
-    note: "is a free coding agent for your terminal. It does not speak the Agent Client Protocol yet, so nurb cannot drive it in the app; install it and use it from the terminal.",
-    install: "npm install -g freebuff",
-}];
+/// External agents: CLIs the help modal mentions but the app cannot drive yet.
+/// The list is empty by default; the extension runtime handles terminal-hosted
+/// and external-app agents separately. This array exists for agents that
+/// predate the extension system and have no ACP interface.
+pub const EXTERNAL: &[ExternalAgent] = &[];
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -433,9 +428,10 @@ mod tests {
 
     /// The help-only agents must never be spawnable: parsing their id fails,
     /// so a login or session cannot launch a CLI the app has no bridge for.
+    /// When the list is empty (as it is by default), the extension system
+    /// handles external agents through manifests instead.
     #[test]
     fn external_agents_are_help_only_and_never_spawnable() {
-        assert!(!super::EXTERNAL.is_empty());
         for agent in super::EXTERNAL {
             assert!(
                 AgentKind::parse(agent.id).is_err(),

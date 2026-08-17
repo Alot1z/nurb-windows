@@ -37,8 +37,7 @@ export default function AgentsHelp({
               <p>
                 Paste the line into {shell} to install the tool. Cursor and Grok
                 then appear in the agent list when you come back; each card says
-                what its subscription costs, and Freebuff's card says how it is
-                different.
+                what its subscription costs.
               </p>
               {missing.map((agent) => (
                 <div className="agents-help-agent" key={agent.id}>

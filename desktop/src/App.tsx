@@ -248,7 +248,7 @@ function App() {
   const [showAgentsHelp, setShowAgentsHelp] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   // Developer-only extension surface: experimental integrations the app can
-  // host (Freebuff CLI in a terminal) or launch (Freebuff Desktop). Off by
+  // host (CLI in a terminal) or launch (external app). Off by
   // default and absent from the normal feature set.
   const [extStatuses, setExtStatuses] = useState<ExtensionStatus[]>([]);
   const [showExtensions, setShowExtensions] = useState(false);

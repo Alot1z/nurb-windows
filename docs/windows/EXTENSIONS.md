@@ -2,8 +2,7 @@
 
 Optional capabilities that ship as data, not as core code. An extension is a
 manifest plus a host kind; the core knows how to run each host kind and
-nothing else about the extension. The first two extensions are the
-developer-only Freebuff pair, but nothing in the system is Freebuff-specific.
+nothing else about the extension.
 
 ## Host kinds
 
@@ -64,8 +63,8 @@ Tools: `nurb_build`, `nurb_check`, `nurb_inspect`, `nurb_verify`,
 `nurb_export`, `nurb_rules`, `nurb_api`. Resources: `nurb://parts`,
 `nurb://card/<part>`, `nurb://doctrine`.
 
-An MCP-capable agent (Freebuff's CLI is one) can call these through its own
-supported mechanism once the user adds the server to the agent's `mcp.json`:
+An MCP-capable agent can call these through its own supported mechanism once
+the user adds the server to the agent's `mcp.json`:
 
 ```json
 {
@@ -93,18 +92,15 @@ consent: the app never edits an agent's configuration.
 
 ## Known limitations
 
-- Freebuff Desktop has no documented open-project mechanism, so the
-  `externalApp` extension launches it without targeting a project.
-- Freebuff's free service Terms require human-directed use; the terminal host
-  is designed to that boundary and must not gain automation (see
-  `docs/windows/FREEBUFF-INTEGRATION.md`).
+- Extensions with no documented open-project mechanism launch without
+  targeting a project.
+- Extensions requiring human-directed use must not gain automation through
+  the terminal host.
 - Extension manifests are builtin, not yet loadable from disk; a directory
   scanner is the next step if third-party extensions arrive.
 
-## Public-release blockers
+## Public-release status
 
-The Freebuff extensions are developer-only until written confirmation from
-Freebuff covers the points listed in
-`docs/windows/FREEBUFF-INTEGRATION.md` section 27 (terminal panel hosting,
-branding, MCP configuration). Nothing in the extension system itself is
-blocked; only the Freebuff entries' release status is.
+All extensions are developer-only and opt-in by default. Nothing in the
+extension system itself is blocked; individual extensions may have additional
+release requirements.

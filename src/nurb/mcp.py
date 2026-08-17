@@ -3,7 +3,7 @@ Protocol as tools and the project's files as resources.
 
 This is a stdio server speaking the MCP JSON-RPC framing (one JSON object per
 line, the transport the official @modelcontextprotocol SDK clients use). It
-exists so an MCP-capable agent (Freebuff's CLI is one) can call nurb build,
+exists so an MCP-capable agent can call nurb build,
 check, inspect, verify, and export through the agent's own supported
 mechanism, after the user enables it in the agent's mcp.json.
 
@@ -194,10 +194,22 @@ def _read_resource(uri, project):
         }
     if uri.startswith("nurb://card/"):
         part = uri.removeprefix("nurb://card/")
-        card = project / "parts" / f"{part}.md"
-        if card.is_file():
-            return {"contents": [{"uri": uri, "mimeType": "text/markdown", "text": card.read_text(encoding="utf-8")}]}
-        raise McpError(-32002, f"no card for {part}")
+        # A part name is a module stem: no separators, no dot-leading names.
+        # Anything else would resolve outside parts/ (nurb://card/..\..\x.md
+        # reads an arbitrary .md file), which is the one thing this server
+        # promises not to do.
+        if (
+            not part
+            or part in (".", "..")
+            or part.startswith(".")
+            or "/" in part
+            or "\\" in part
+        ):
+            raise McpError(-32002, f"invalid card resource: {part!r}")
+        card = (project / "parts" / f"{part}.md").resolve()
+        if not card.is_file() or card.parent != (project / "parts").resolve():
+            raise McpError(-32002, f"no card for {part}")
+        return {"contents": [{"uri": uri, "mimeType": "text/markdown", "text": card.read_text(encoding="utf-8")}]}
     raise McpError(-32002, f"unknown resource: {uri}")
 
 

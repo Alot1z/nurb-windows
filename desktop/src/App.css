@@ -1679,8 +1679,8 @@ textarea {
   margin: 0 0 14px;
 }
 
-/* The developer extension surface: the Freebuff CLI terminal host and the
-   extension cards. Everything here is opt-in and off by default. */
+/* The developer extension surface: terminal host and extension cards.
+   Everything here is opt-in and off by default. */
 .terminal-card {
   width: min(720px, calc(100vw - 80px));
   height: min(480px, calc(100vh - 120px));
