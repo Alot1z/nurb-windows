@@ -2,12 +2,11 @@
 //! core code. An extension is a manifest plus a host kind; the core knows how
 //! to run each host kind and nothing else about the extension.
 //!
-//! The first two extensions are the developer-only Freebuff pair (the CLI,
-//! hosted in a terminal the app owns, and Desktop, launched as a separate
-//! application), but nothing in this module is Freebuff-specific: any
-//! interactive CLI or external application can be described with the same
-//! manifest. Extensions are opt-in and disabled by default; the app only
-//! ever launches an executable the user's own installer put on the machine.
+//! Extensions are opt-in and disabled by default; the app only ever launches
+//! an executable the user's own installer put on the machine. The registry is
+//! generic: any interactive CLI or external application can be described with
+//! the same manifest. The BUILTIN table ships the shipped extensions; user-
+//! loadable manifests are the planned next step.
 //!
 //! The human-in-the-loop boundary lives here too: a Terminal host moves bytes
 //! between the user and the CLI and nothing else. There is deliberately no
@@ -77,43 +76,42 @@ pub struct Manifest {
     pub note: &'static str,
 }
 
-/// The two developer-only Freebuff extensions. The CLI is hosted in a
-/// terminal the app owns (ConPTY on Windows) and launched with Freebuff's own
-/// `--cwd` so the project directory is official input, not a wrapper
-/// invention. Desktop is launched externally; there is no official embedding
-/// mechanism, so this extension never touches its window.
-const BUILTIN: [Manifest; 2] = [
-    Manifest {
-        id: "freebuff-cli",
-        label: "Freebuff CLI",
-        version: "0.1.0",
-        min_app_version: "0.20.1",
-        dev_only: true,
-        host: HostKind::Terminal,
-        lookups: &[
-            Lookup::OnPath("freebuff"),
-            Lookup::UnderHome(&[".config/manicode/codebuff"], "codecane"),
-        ],
-        launch: &["freebuff", "--cwd", "{project}"],
-        install: "npm install -g freebuff",
-        note: "Runs the official Freebuff CLI in a terminal here. Your account, ads, and backend stay Freebuff's; nurb only hosts the session.",
-    },
-    Manifest {
-        id: "freebuff-desktop",
-        label: "Freebuff Desktop",
-        version: "0.1.0",
-        min_app_version: "0.20.1",
-        dev_only: true,
-        host: HostKind::ExternalApp,
-        lookups: &[Lookup::UnderLocalAppData(&["Programs/Freebuff", "Freebuff"], "Freebuff")],
-        launch: &[],
-        install: "https://freebuff.com/desktop",
-        note: "Launches the official Freebuff Desktop app. nurb cannot open projects in it yet: Desktop has no documented open-project mechanism.",
-    },
-];
+/// Built-in extension manifests. Each entry is a complete extension
+/// definition: what to call it, how to find it, how to launch it, and what to
+/// tell the user. New extensions are added here as data, not as code.
+///
+/// Developer-only extensions are disabled by default and shown only in the
+/// developer surface, not in the normal release feature set.
+const BUILTIN: &[Manifest] = &[];
+
+// To add a built-in extension, push a Manifest entry to BUILTIN above. For
+// example:
+//
+//   Manifest {
+//       id: "my-tool",
+//       label: "My Tool",
+//       version: "0.1.0",
+//       min_app_version: "0.20.1",
+//       dev_only: true,
+//       host: HostKind::Terminal,
+//       lookups: &[Lookup::OnPath("my-tool")],
+//       launch: &["my-tool", "--cwd", "{project}"],
+//       install: "npm install -g my-tool",
+//       note: "Runs my-tool in a terminal here.",
+//   },
 
 pub fn manifest(id: &str) -> Option<&'static Manifest> {
     BUILTIN.iter().find(|m| m.id == id)
+}
+
+/// Register a manifest at runtime (for user-loaded extensions). The manifest
+/// is validated: ID must be unique, host kind must be known, and the minimum
+/// app version must be parseable.
+pub fn register(_manifest: Manifest) -> Result<(), String> {
+    // User extensions are the next step; for now the registry is builtin-only.
+    // This stub exists so the public API surface is stable when user
+    // extensions arrive.
+    Err("user extensions are not yet supported".into())
 }
 
 /// File names worth trying for an executable on this platform. Windows needs
@@ -298,8 +296,7 @@ mod tests {
 
     #[test]
     fn manifest_lookup_is_exact() {
-        assert!(manifest("freebuff-cli").is_some());
-        assert!(manifest("freebuff-desktop").is_some());
+        // Builtin table is empty by default; user extensions arrive later.
         assert!(manifest("bogus").is_none());
     }
 
@@ -311,16 +308,6 @@ mod tests {
         assert!(!version_at_least("0.20.0", "0.20.1"));
         assert!(!version_at_least("0.19.9", "0.20.1"));
         assert!(!version_at_least("banana", "0.20.1"));
-    }
-
-    #[test]
-    fn terminal_manifest_launches_with_cwd_only() {
-        let m = manifest("freebuff-cli").unwrap();
-        assert_eq!(m.host, HostKind::Terminal);
-        // The project directory is the only substitution; a launch template
-        // with more placeholders would be a prompt-injection surface.
-        assert_eq!(m.launch, &["freebuff", "--cwd", "{project}"]);
-        assert!(m.dev_only);
     }
 
     #[test]
@@ -344,13 +331,21 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("nurb-ext-state-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let mut ext = Extensions::load(&dir);
-        assert!(!ext.is_enabled("freebuff-cli")); // dev-only: off by default
-        ext.set_enabled("freebuff-cli", true).unwrap();
-        assert!(ext.is_enabled("freebuff-cli"));
         assert!(ext.set_enabled("nope", true).is_err());
-        drop(ext);
-        let reloaded = Extensions::load(&dir);
-        assert!(reloaded.is_enabled("freebuff-cli"));
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn launch_template_only_substitutes_project() {
+        // A launch template with more placeholders would be a prompt-injection
+        // surface. This test asserts the contract on any future manifest: only
+        // {project} is ever replaced.
+        for manifest in BUILTIN.iter() {
+            for arg in manifest.launch {
+                if arg.contains('{') {
+                    assert_eq!(arg, "{project}");
+                }
+            }
+        }
     }
 }

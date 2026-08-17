@@ -40,8 +40,8 @@ minisign-verify = "0.2"
 # destroys user work, so it has to be recoverable.
 trash = "5"
 # The terminal host: ConPTY on Windows, pty elsewhere. The one runtime the
-# extension system needs to host interactive CLIs (Freebuff CLI first) as
-# real terminals. Byte transport only; see terminal.rs for the contract.
+# extension system needs to host interactive CLIs as real terminals.
+# Byte transport only; see terminal.rs for the contract.
 portable-pty = "0.8"
 tauri-plugin-clipboard-manager = "2"
 

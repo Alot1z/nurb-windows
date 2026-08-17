@@ -154,3 +154,40 @@ def test_parse_error_keeps_the_loop_running(project):
         assert ping["result"] == {}
     finally:
         client.close()
+
+
+def test_card_resource_rejects_path_traversal(project):
+    """The card resource is a module stem inside parts/; anything with a
+    separator must be refused, not resolved against the filesystem. This is
+    the project-boundary promise of the server, asserted over the wire."""
+    client = Client(project)
+    try:
+        client.notify("notifications/initialized")
+        # An absolute path, a parent traversal, and a Windows-style traversal
+        # must all be refused as invalid, never read.
+        for uri in [
+            "nurb://card/C:\\Windows\\win.ini",
+            "nurb://card/..\\..\\secrets",
+            "nurb://card/../secrets",
+            "nurb://card/.hidden",
+            "nurb://card/",
+        ]:
+            reply = client.request("resources/read", {"uri": uri})
+            assert reply["error"]["code"] == -32002, (uri, reply)
+        # The legitimate card still reads fine afterwards.
+        card = client.request("resources/read", {"uri": "nurb://card/widget"})
+        assert "A card" in card["result"]["contents"][0]["text"]
+    finally:
+        client.close()
+
+
+def test_resource_read_rejects_unknown_uris(project):
+    client = Client(project)
+    try:
+        client.notify("notifications/initialized")
+        reply = client.request("resources/read", {"uri": "nurb://bogus"})
+        assert reply["error"]["code"] == -32002
+        reply = client.request("resources/read", {"uri": "file:///etc/passwd"})
+        assert reply["error"]["code"] == -32002
+    finally:
+        client.close()

@@ -178,24 +178,30 @@ pub fn set_extension_enabled(
     extensions.lock().unwrap().set_enabled(&id, enabled)
 }
 
-/// Open a Terminal-host extension (Freebuff CLI) in a ConPTY session pointed
-/// at the project. Only the extension registry decides what runs: the id must
-/// name a known Terminal manifest, and its executable must be the user's own
-/// install. This is the only terminal-open entry point, so an arbitrary
-/// command can never be launched from the UI.
+/// Open a Terminal-host extension in a ConPTY session pointed at the project.
+/// Only the extension registry decides what runs: `extension` must name a known
+/// Terminal manifest, and its executable must be the user's own install. This
+/// is the only terminal-open entry point, so an arbitrary command can never be
+/// launched from the UI.
+///
+/// `session` is the UI's handle for the live session and is deliberately
+/// separate from `extension`: session identity is per panel, not per
+/// extension, so opening the same extension twice cannot collapse two live
+/// sessions into one map entry (and close one and kill the other).
 #[tauri::command]
 pub fn open_terminal_extension(
     app: tauri::AppHandle,
     extensions: tauri::State<std::sync::Mutex<crate::extensions::Extensions>>,
     terminals: tauri::State<Terminals>,
-    id: String,
+    session: String,
+    extension: String,
     project_dir: String,
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
-    let (exe, manifest) = extensions.lock().unwrap().resolved(&id)?;
+    let (exe, manifest) = extensions.lock().unwrap().resolved(&extension)?;
     if manifest.host != extensions::HostKind::Terminal {
-        return Err(format!("{id} is not a terminal extension"));
+        return Err(format!("{extension} is not a terminal extension"));
     }
     if !extensions::version_at_least(&app.package_info().version.to_string(), manifest.min_app_version)
     {
@@ -208,13 +214,13 @@ pub fn open_terminal_extension(
     if !project.join("parts").is_dir() {
         return Err(format!("{} is not a nurb project (no parts/)", project.display()));
     }
-    terminals.open(&app, &id, &exe, manifest.launch, &project, cols.max(2), rows.max(2))
+    terminals.open(&app, &session, &exe, manifest.launch, &project, cols.max(2), rows.max(2))
 }
 
-/// Launch an ExternalApp extension (Freebuff Desktop) detached. The app is
-/// never touched afterward: no window manipulation, no IPC, no arguments
-/// beyond an optional project hint where the product documents one (none do
-/// today, so none are passed).
+/// Launch an ExternalApp extension detached. The app is never touched
+/// afterward: no window manipulation, no IPC, no arguments beyond an optional
+/// project hint where the product documents one (none do today, so none are
+/// passed).
 #[tauri::command]
 pub fn launch_external_extension(
     extensions: tauri::State<std::sync::Mutex<crate::extensions::Extensions>>,

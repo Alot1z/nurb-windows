@@ -5,7 +5,7 @@ import { Terminal } from "xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "xterm/css/xterm.css";
 
-// The terminal host surface for a developer extension (Freebuff CLI today):
+// The terminal host surface for a developer extension:
 // an xterm.js panel fed byte-for-byte by the ConPTY session in terminal.rs.
 // The panel only transports bytes - keystrokes go to the child, output comes
 // back - so what the user sees is the official CLI exactly as it would run in
@@ -32,6 +32,11 @@ export default function TerminalPanel({
   projectDir: string;
   onClose: () => void;
 }) {
+  // The panel's own session handle, distinct from the extension id: the Rust
+  // host keys live sessions by this, so two panels of the same extension stay
+  // separate sessions instead of colliding in one map entry. Fixed per mount;
+  // reopening the panel gets a fresh id.
+  const [sessionId] = useState(() => `${id}-${Math.random().toString(36).slice(2, 10)}`);
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -40,12 +45,12 @@ export default function TerminalPanel({
   const resize = useCallback(
     (term: Terminal) => {
       invoke("terminal_resize", {
-        id,
+        id: sessionId,
         cols: term.cols,
         rows: term.rows,
       }).catch(() => {});
     },
-    [id],
+    [sessionId],
   );
 
   useEffect(() => {
@@ -65,14 +70,15 @@ export default function TerminalPanel({
 
     // Keystrokes go straight to the child; nothing else ever writes input.
     term.onData((data) => {
-      invoke("terminal_input", { id, data }).catch((e) =>
+      invoke("terminal_input", { id: sessionId, data }).catch((e) =>
         setError(String(e)),
       );
     });
     term.onResize(() => resize(term));
 
     invoke("open_terminal_extension", {
-      id,
+      session: sessionId,
+      extension: id,
       projectDir,
       cols: term.cols,
       rows: term.rows,
@@ -87,24 +93,24 @@ export default function TerminalPanel({
     let unlistenOutput: (() => void) | undefined;
     let unlistenExit: (() => void) | undefined;
     listen<OutputEvent>("terminal-output", (event) => {
-      if (event.payload.id === id) {
+      if (event.payload.id === sessionId) {
         term.write(base64ToBytes(event.payload.data));
       }
     }).then((fn) => (unlistenOutput = fn));
     listen<ExitEvent>("terminal-exit", (event) => {
-      if (event.payload.id === id) setExited(event.payload.code ?? 0);
+      if (event.payload.id === sessionId) setExited(event.payload.code ?? 0);
     }).then((fn) => (unlistenExit = fn));
 
     return () => {
       ro.disconnect();
       unlistenOutput?.();
       unlistenExit?.();
-      invoke("terminal_close", { id }).catch(() => {});
+      invoke("terminal_close", { id: sessionId }).catch(() => {});
       term.dispose();
       termRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, projectDir]);
+  }, [sessionId, id, projectDir]);
 
   return (
     <div className="about" onClick={(e) => e.target === e.currentTarget && onClose()}>
