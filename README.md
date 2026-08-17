@@ -1,10 +1,39 @@
-# nurb for Windows
+<div align="center">
 
-Agentic CAD for 3D printing, rebuilt as a first-class Windows application. Your agent writes parts as Python functions, nurb builds them into real solids, checks them against print physics, and shows you the result live. You judge, drag sliders, download the 3MF.
+# <code>nurb</code> for Windows
 
-This repository is a fork of [upstream nurb](https://github.com/Shpigford/nurb) that keeps the upstream engine mergeable while adding a Windows-native desktop app, installer, runtime provisioning, signed auto-updates, and Windows CI. Everything that runs on macOS and Linux in upstream still runs here; the difference is that Windows is now a first-class target rather than an afterthought.
+```
+ _   _ _   _ ____  ____
+| \ | | | | |  _ \| __ )
+|  \| | | | | |_) |  _ \
+| |\  | |_| |  _ <| |_) |
+|_| \_|\___/|_| \_\____/
+```
+
+**Agentic CAD for 3D printing, rebuilt as a first-class Windows application.**
+Your agent writes parts as Python functions, nurb builds them into real solids,
+checks them against print physics, and shows you the result live. You judge,
+drag sliders, download the 3MF.
+
+*A fork of [upstream nurb](https://github.com/Shpigford/nurb) · Windows 10/11 x64 ·
+signed auto-updates · NSIS installer · Windows CI*
+
+[![windows-build](https://img.shields.io/github/actions/workflow/status/Alot1z/nurb-windows/windows-build.yml?label=windows-build&logo=github)](https://github.com/Alot1z/nurb-windows/actions/workflows/windows-build.yml)
+[![latest release](https://img.shields.io/github/v/release/Alot1z/nurb-windows?label=latest%20release&logo=windows)](https://github.com/Alot1z/nurb-windows/releases/latest)
+[![upstream](https://img.shields.io/badge/upstream-Shpigford%2Fnurb-2ea44f)](https://github.com/Shpigford/nurb)
+[![license](https://img.shields.io/badge/license-FSL--1.1--MIT-blue)](LICENSE)
+
+</div>
 
 <img width="2062" height="1232" alt="Viewer" src="https://github.com/user-attachments/assets/77c7c392-3454-42a0-aaf6-159b81e7dcff" />
+
+## What is this?
+
+**nurb for Windows is a ported fork, not a rewrite.** It takes [upstream nurb](https://github.com/Shpigford/nurb) (agentic CAD on the OCCT kernel, built by Ordinary Systems) and makes Windows a first-class target: a Windows-native desktop app, an NSIS installer, a self-provisioning Python/OCCT runtime, signed auto-updates from this fork's own release channel, and Windows CI. The upstream engine is kept as close to the original as technically possible, so future upstream changes merge back with minimal conflict. Everything upstream runs on macOS and Linux still runs here; the difference is that Windows is now the primary target rather than an afterthought.
+
+- **For people:** download the installer from the [latest release](https://github.com/Alot1z/nurb-windows/releases/latest) and run it. No Python, no uv, no terminal setup: the first launch provisions everything into your app data.
+- **For AI agents:** `nurb skill` teaches your agent this fork's conventions, Windows paths (`%APPDATA%\nurb\config.toml`), `viewer.cmd`, and PowerShell included. The design doctrine ships in the package (`nurb rules`) and is the one source of truth.
+- **For maintainers:** the fork's merge model, patch register, and sync tooling live in [docs/windows/](docs/windows/).
 
 ## Install
 

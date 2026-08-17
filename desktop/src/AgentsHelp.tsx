@@ -35,9 +35,10 @@ export default function AgentsHelp({
           {missing.length > 0 ? (
             <>
               <p>
-                These work with nurb once their command-line tool is on {machine}. Paste
-                the line into {shell}, and the agent appears in the list when you come
-                back.
+                Paste the line into {shell} to install the tool. Cursor and Grok
+                then appear in the agent list when you come back; each card says
+                what its subscription costs, and 's card says how it is
+                different.
               </p>
               {missing.map((agent) => (
                 <div className="agents-help-agent" key={agent.id}>

@@ -1123,7 +1123,7 @@ function App() {
               <span>agents</span>
             </div>
             {agentStatuses
-              // Agents whose CLI is not on this Mac stay out of the rail;
+              // Agents whose CLI is not on this PC stay out of the rail;
               // the "need another agent?" help is where they live.
               .filter((status) => status.installed)
               .map((status) => (
