@@ -21,3 +21,4 @@ wheels/
 tests/_scratch_mcp/
 
 /.dev/
+/./
