@@ -17,6 +17,21 @@ import pytest
 REPO = pathlib.Path(__file__).resolve().parents[1]
 
 
+@pytest.fixture(scope="module")
+def not_shallow() -> bool:
+    """The live-CLI tests need the fork's full history: `status` walks
+    merge-base against upstream/main, which a shallow CI checkout (default
+    actions/checkout without fetch-depth: 0) cannot provide. Skip them there
+    rather than crashing on git's exit 1."""
+    proc = subprocess.run(
+        ["git", "rev-parse", "--is-shallow-repository"],
+        cwd=str(REPO),
+        capture_output=True,
+        text=True,
+    )
+    return proc.stdout.strip() != "true"
+
+
 def _load_module():
     spec = importlib.util.spec_from_file_location(
         "upstream_sync", REPO / "tools" / "upstream_sync.py"
@@ -100,11 +115,13 @@ def test_status_function_accepts_strict_kwarg():
     assert sig.parameters["strict"].default is False
 
 
-def test_strict_status_fails_against_live_fork():
+def test_strict_status_fails_against_live_fork(not_shallow):
     """The fork is currently behind upstream on SAFE-zone files
     (src/nurb/mcp.py, src/nurb/platform/, etc.), so a --strict run on this
     checkout must exit non-zero. When the fork catches up the test inverts,
     which is also correct."""
+    if not not_shallow:
+        pytest.skip("shallow checkout; live merge-base walk unavailable")
     proc = subprocess.run(
         [sys.executable, "tools/upstream_sync.py", "status", "--strict"],
         cwd=str(REPO),
@@ -122,7 +139,9 @@ def test_strict_status_fails_against_live_fork():
         assert "Merge upstream" in joined, joined
 
 
-def test_status_without_strict_remains_informational():
+def test_status_without_strict_remains_informational(not_shallow):
+    if not not_shallow:
+        pytest.skip("shallow checkout; live merge-base walk unavailable")
     proc = subprocess.run(
         [sys.executable, "tools/upstream_sync.py", "status"],
         cwd=str(REPO),
