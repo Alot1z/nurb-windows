@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Belt-and-braces local guard. Refuses to:
+#
+#   1. Stage any path under `/.dev/` even if `git add -f` is used.
+#   2. Stage content that mentions the third-party product the public
+#      fork is no longer allowed to ship.
+#
+# Lives under .githooks/ and is enabled by
+#   git config core.hooksPath .githooks
+# so a fresh checkout automatically picks it up.
+
+set -euo pipefail
+
+# 1. Refuse to stage anything under `.dev/`.
+staged_dev=""
+staged_dev="$(git diff --cached --name-only -- '.dev/' 2>/dev/null || true)"
+staged_dev_it_anew="$(git diff --cached --name-only --diff-filter=A -- '.dev/' 2>/dev/null || true)"
+if [ -n "$staged_dev" ] || [ -n "$staged_dev_it_anew" ]; then
+    {
+        echo "pre-commit guard: refusing to commit files under .dev/:"
+        echo "$staged_dev"
+        echo "$staged_dev_it_anew"
+    } >&2
+    exit 1
+fi
+
+# 2. Refuse any staged content that mentions the banned phrases.
+matches=""
+matches="$(git diff --cached -- ':(exclude).githooks/' \
+    | grep -iE '|' || true)"
+if [ -n "$matches" ]; then
+    {
+        echo "pre-commit guard: forbidden phrase found in staged diff:"
+        echo "$matches" | head -10
+    } >&2
+    exit 1
+fi

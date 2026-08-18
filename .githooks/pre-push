@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# Push-time guard. Re-checks every commit reachable from the push range
+# for paths under `.dev/` and for the third-party product name in tree
+# contents and commit messages. Refuses to push if any are found.
+#
+# Lives under .githooks/ and is enabled by
+#   git config core.hooksPath .githooks
+
+set -euo pipefail
+
+remote="$1"
+url="$2"
+
+# Collect the refs being pushed out of stdin. /dev/stdin is not
+# reliably available on Windows under mingw bash (the test for
+# readability reports true but redirection fails), so read from FD 0
+# directly. The pipe is set up by git itself when invoking this hook.
+refs_to_push=()
+while read -r line; do
+    refs_to_push+=("$line")
+done
+
+scan_tree_forbidden() {
+    local sha="$1"
+    local matches
+    matches="$(git ls-tree -r "$sha" 2>/dev/null \
+        | awk '{print $4}' \
+        | grep -v '^\.githooks/' \
+        | grep -v '^\.devignore$$\|^\.gitignore$$' \
+        | while read -r path; do
+            blob_id="$(git ls-tree -r "$sha" -- "$path" 2>/dev/null \
+                | awk '{print $3}' | head -1)"
+            if [ -n "$blob_id" ]; then
+                git cat-file -p "$blob_id" 2>/dev/null \
+                    | grep -iE '|' \
+                    | sed "s/^/$path: /"
+            fi
+        done)"
+    if [ -n "$matches" ]; then
+        printf 'forbidden phrase in commit %s tree:\n%s\n' "$sha" "$matches" >&2
+        return 1
+    fi
+    return 0
+}
+
+scan_commit_log() {
+    local sha="$1"
+    if git log -1 --format='%B' "$sha" 2>/dev/null \
+        | grep -vE '^🤖' \
+        | grep -iE '|' >/dev/null; then
+        printf 'forbidden phrase in commit %s message:\n' "$sha" >&2 >&2
+        git log -1 --format='%B' "$sha" | grep -iE '|' >&2
+        return 1
+    fi
+    return 0
+}
+
+scan_dev_paths() {
+    local sha="$1"
+    local matches
+    matches="$(git ls-tree -r "$sha" 2>/dev/null \
+        | awk '{print $4}' \
+        | grep -E '^\.dev/|/\.dev/' \
+        | head -3)"
+    if [ -n "$matches" ]; then
+        printf 'commit %s contains paths under .dev/:\n%s\n' "$sha" "$matches" >&2
+        return 1
+    fi
+    return 0
+}
+
+failure=0
+
+for ref_line in "${refs_to_push[@]}"; do
+    # Format: <local_ref> <remote_ref> <local_sha> ...
+    local_ref="$(echo "$ref_line" | awk '{print $1}')"
+    if [ -z "$local_ref" ] || [ "$local_ref" = "(delete)" ]; then
+        continue
+    fi
+    commit="$(git rev-parse --verify "$local_ref^{commit}" 2>/dev/null || echo "")"
+    if [ -z "$commit" ]; then
+        continue
+    fi
+    history="$(git rev-list "$commit" 2>/dev/null || true)"
+    for c in $history; do
+        if ! scan_tree_forbidden "$c"; then
+            failure=1
+        fi
+        if ! scan_commit_log "$c"; then
+            failure=1
+        fi
+        if ! scan_dev_paths "$c"; then
+            failure=1
+        fi
+    done
+done
+
+# Allow empty pushes from new branches with no commits.
+if [ "$failure" -ne 0 ]; then
+    printf '\npre-push guard: refusing to push forbidden content to %s\n' "$url" >&2
+    exit 1
+fi
