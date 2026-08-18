@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import hashlib
 import os
@@ -89,6 +89,87 @@ def fetch_uv(target: str) -> Path:
     return destination
 
 
+def signable_targets() -> list:
+    """Locate Windows executables that, once produced, are candidates for
+    Authenticode signing. A staged build that hasn't produced these files
+    is a no-op at the signing layer — their absence is not an error here,
+    only the loud-fail decision lives in `check_authenticode_signing`."""
+    out = []
+    for candidate in (
+        BINARIES / 'uv-x86_64-pc-windows-msvc.exe',
+        BINARIES / 'uv-aarch64-pc-windows-msvc.exe',
+    ):
+        if candidate.exists():
+            out.append(candidate)
+    return out
+
+
+def check_authenticode_signing(executables) -> int:
+    """Validate or perform Authenticode (SmartScreen) signing on produced
+    Windows executables. Behavior is fully env-gated so local dev builds
+    keep working without ceremony:
+
+    - When `NURB_WINDOWS_AUTHENTICODE_REQUIRED` is unset, this is a
+      no-op that prints a one-line status.
+    - When set to `1`, signing must succeed. The certificate material is
+      read from `NURB_WINDOWS_AUTHENTICODE_PFX` (path to a .pfx) and the
+      optional password from `NURB_WINDOWS_AUTHENTICODE_PFX_PASSWORD`,
+      and `signtool.exe` must be on PATH (Windows SDK). A timestamp
+      authority may be set in `NURB_WINDOWS_AUTHENTICODE_TIMESTAMP_URL`
+      and defaults to DigiCert. Loud failure otherwise, so that the
+      release pipeline never silently ships an unsigned executable when
+      it asked for a signed one.
+
+    The cert material itself is an EXTERNAL dependency: this repo never
+    stores it, only references the path the CI environment passes in.
+    """
+    required = os.environ.get('NURB_WINDOWS_AUTHENTICODE_REQUIRED', '') == '1'
+    if not required:
+        if executables:
+            print(
+                'authenticode: not required '
+                '(set NURB_WINDOWS_AUTHENTICODE_REQUIRED=1 to sign)'
+            )
+        return 0
+    if not executables:
+        raise RuntimeError(
+            'authenticode required but no produced Windows executables '
+            'were found'
+        )
+    pfx = os.environ.get('NURB_WINDOWS_AUTHENTICODE_PFX')
+    if not pfx:
+        raise RuntimeError(
+            'authenticode required but NURB_WINDOWS_AUTHENTICODE_PFX is unset'
+        )
+    if not Path(pfx).is_file():
+        raise RuntimeError(f'authenticode: PFX not found at {pfx}')
+    signtool_path = shutil.which('signtool') or shutil.which('signtool.exe')
+    if signtool_path is None:
+        raise RuntimeError(
+            'authenticode required but signtool.exe is not on PATH '
+            '(install the Windows SDK)'
+        )
+    timestamp = os.environ.get(
+        'NURB_WINDOWS_AUTHENTICODE_TIMESTAMP_URL',
+        'http://timestamp.digicert.com',
+    )
+    password = os.environ.get('NURB_WINDOWS_AUTHENTICODE_PFX_PASSWORD')
+    cmd = [
+        signtool_path,
+        'sign',
+        '/fd', 'sha256',
+        '/td', 'sha256',
+        '/tr', timestamp,
+        '/f', pfx,
+    ]
+    if password:
+        cmd += ['/p', password]
+    for exe in executables:
+        subprocess.run(cmd + [str(exe)], check=True)
+        print(f'authenticode: signed {exe.name}')
+    return 0
+
+
 def main() -> int:
     target = target_triple()
     RESOURCES.mkdir(parents=True, exist_ok=True)
@@ -105,4 +186,7 @@ def main() -> int:
 
 
 if __name__ == '__main__':
-    raise SystemExit(main())
+    code = main()
+    if code == 0:
+        code = check_authenticode_signing(signable_targets())
+    raise SystemExit(code)
