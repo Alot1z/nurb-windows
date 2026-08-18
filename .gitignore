@@ -20,6 +20,4 @@ wheels/
 # Scratch project the MCP server tests build parts in
 tests/_scratch_mcp/
 
-#  private development docs
-docs/windows/-INTEGRATION.md
-docs/windows/-PERMISSION-REQUEST.md
+/.dev/
