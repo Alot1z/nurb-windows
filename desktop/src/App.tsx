@@ -11,6 +11,7 @@ import AgentsHelp from "./AgentsHelp";
 import ExtensionsModal, { type ExtensionStatus } from "./ExtensionsModal";
 import TerminalPanel from "./TerminalPanel";
 import Chat, { AGENT_LABEL, PROJECT_CHAT } from "./Chat";
+import GeminiKeyDialog from "./GeminiKeyDialog";
 import {
   chatKey,
   markChatSeen,
@@ -142,6 +143,9 @@ function App() {
   // the selected part itself did not change.
   const variantRequest = useRef<PartConfigurationRequest | null>(null);
   const [variantRequestVersion, setVariantRequestVersion] = useState(0);
+  // The viewer's report of which variant the sliders started from, and whether they
+  // have drifted off it. It is what keeps a drifted variant's rail row pinned.
+  const [variantOrigin, setVariantOrigin] = useState<{ part: string; variant: string; drifted: boolean } | null>(null);
   const [naming, setNaming] = useState(false);
   const [creating, setCreating] = useState(false);
   const [partNaming, setPartNaming] = useState(false);
@@ -253,6 +257,8 @@ function App() {
   const [extStatuses, setExtStatuses] = useState<ExtensionStatus[]>([]);
   const [showExtensions, setShowExtensions] = useState(false);
   const [terminalExt, setTerminalExt] = useState<ExtensionStatus | null>(null);
+  const [showGeminiKey, setShowGeminiKey] = useState(false);
+  const geminiKeyResolver = useRef<((key: string | null) => void) | null>(null);
   const [defaultProjectsFolder, setDefaultProjectsFolder] = useState<string | null>(null);
   const [projectsFolder, setProjectsFolder] = useState<string | null>(
     () => localStorage.getItem(PROJECTS_FOLDER_KEY),
@@ -376,6 +382,14 @@ function App() {
       if (event.data === "nurb:drag") getCurrentWindow().startDragging().catch(() => {});
       if (event.data?.type === "nurb:saved" && typeof event.data.path === "string")
         revealItemInDir(event.data.path).catch(() => {});
+      // The viewer's variant pin: the sliders started from a variant and may have
+      // left it, and the rail draws its own variant rows, so it needs to know.
+      if (event.data?.type === "nurb:variant")
+        setVariantOrigin(
+          typeof event.data.part === "string" && typeof event.data.variant === "string"
+            ? { part: event.data.part, variant: event.data.variant, drifted: !!event.data.drifted }
+            : null,
+        );
       // The viewer's "unify in chat" nudge: parts repeating the same construction
       // are a project-wide matter, so it lands in the project conversation.
       if (
@@ -406,14 +420,30 @@ function App() {
     localStorage.setItem("nurb-default-agent", id);
   };
 
-  const signInAgent = async (id: string) => {
+  const requestGeminiKey = () =>
+    new Promise<string | null>((resolve) => {
+      geminiKeyResolver.current = resolve;
+      setShowGeminiKey(true);
+    });
+
+  const finishGeminiKey = (key: string | null) => {
+    setShowGeminiKey(false);
+    geminiKeyResolver.current?.(key);
+    geminiKeyResolver.current = null;
+  };
+
+  const signInAgent = async (id: string): Promise<boolean> => {
+    const apiKey = id === "gemini" ? await requestGeminiKey() : null;
+    if (id === "gemini" && apiKey === null) return false;
     setSigningIn(id);
     setError(null);
     try {
-      await invoke("agent_login", { agent: id });
+      await invoke("agent_login", { agent: id, apiKey });
       await refreshAgents();
+      return true;
     } catch (e) {
       setError(String(e));
+      throw e;
     } finally {
       setSigningIn(null);
     }
@@ -528,6 +558,7 @@ function App() {
   // an agent without session listing), just mean fresh chats.
   useEffect(() => {
     setResumeState(null);
+    setVariantOrigin(null);   // the pin belongs to the viewer this project just left
     // Leaving a project keeps busy columns and hidden results. Ordinary idle
     // columns go now; an unseen one goes after its exact chat has been shown.
     setColumns((list) => retainChatColumns(list, active, busyRef.current));
@@ -1056,10 +1087,18 @@ function App() {
                         const how = Object.entries(v.params)
                           .map(([k, val]) => `${k} = ${val}`)
                           .join("\n");
+                        // Drifted off this variant: no longer resolved by the server,
+                        // but still where the work is, so the row stays pinned.
+                        const modified =
+                          part.name === selectedPart &&
+                          part.variant !== v.name &&
+                          variantOrigin?.drifted === true &&
+                          variantOrigin.part === part.name &&
+                          variantOrigin.variant === v.name;
                         return (
                           <li
                             key={`${part.name}:${v.name}`}
-                            className={`part-var ${part.name === selectedPart && part.variant === v.name ? "selected" : ""}`}
+                            className={`part-var ${part.name === selectedPart && part.variant === v.name ? "selected" : ""} ${modified ? "modified" : ""}`}
                             title={v.note ? `${v.note}\n\n${how}` : how}
                             onClick={() => selectPart(part.name, v.name)}
                           >
@@ -1166,7 +1205,7 @@ function App() {
                     disabled={signingIn !== null}
                     onClick={(e) => {
                       e.stopPropagation();
-                      signInAgent(status.id);
+                      signInAgent(status.id).catch(() => {});
                     }}
                   >
                     {signingIn === status.id ? "signing in…" : "sign in"}
@@ -1280,6 +1319,12 @@ function App() {
           onClose={() => setShowSettings(false)}
         />
       )}
+      {showGeminiKey ? (
+        <GeminiKeyDialog
+          onSubmit={(key) => finishGeminiKey(key)}
+          onClose={() => finishGeminiKey(null)}
+        />
+      ) : null}
       {showAbout && about && (
         <About
           appVersion={about.appVersion}
@@ -1352,7 +1397,7 @@ function App() {
             onBusy={(busy) =>
               chatBusy(col.path, col.part, agent, busy, columnVisible(col))
             }
-            onSignedIn={refreshAgents}
+            onSignIn={signInAgent}
           />
         );
       })}
