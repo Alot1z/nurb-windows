@@ -178,23 +178,27 @@ additive — all of which is preserved under the following headings.
 
 ---
 
-## Upstream drift — what v0.21.0 contains that the fork lacks
+## Upstream v0.21.0 merge — complete
 
-As of this checkout (`HEAD`):
+Upstream `main` at `d8164e6` (v0.21.0, "Embed part-driven print settings in
+  exported 3MFs") has been merged into the fork and the strict gate is green:
+`tools/upstream_sync.py status --strict` exits 0, the release gate reads
+READY, and the fork's merge base is upstream HEAD, so there is zero pending
+merge debt until upstream moves again.
 
-- `upstream/main` is **129 commits ahead** of `origin/main` (which is the
-  fork's published main).
-- `tools/upstream_sync.py status` classifies the drift across three
-  buckets: **SAFE** (cherry-pick candidates, 22 paths today),
-  **REVIEW** (likely conflicts, 0) and **WINDOWS-SPECIFIC** (fork files
-  the upstream does not know about, the bulk of the 81 paths).
-- The strict gate now fails any push that creates new SAFE drift while
-  the fork is behind (the `10ca148` change). Resolving the gate is the
-  upstream merge of v0.21.0 — tracked as a dedicated session and not
-  shortcut in this changelog.
+The merge resolved real conflicts in `src/nurb/slicing.py`,
+`src/nurb/viewer.html`, the `tests/` files, `uv.lock` and the desktop tree.
+Every resolution kept the fork's Windows behavior inside upstream's new
+structure; the per-path decisions and the traps that cost CI cycles (tauri
+CLI line-ending rewrite, dropped `os` import in tests, the `agents.md`
+shim contract) are documented in `docs/windows/PORTING-MERGE-CHECKLIST.md`.
 
-See `docs/windows/PORTING.md` for the merge protocol and
-`docs/windows/UPSTREAM-SYNC.md` for the strict-gate semantics.
+The strict gate (`10ca148`) proved itself here: it was the red check that
+forced this merge, and it flipped green only when the fork actually caught
+up. It is not a CI defect; it is drift detection working.
+
+See `docs/windows/PORTING-MERGE-CHECKLIST.md` for the repeatable protocol
+and `docs/windows/UPSTREAM-SYNC.md` for the strict-gate semantics.
 
 ---
 
