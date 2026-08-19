@@ -209,6 +209,13 @@ CHECKS = [
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--json", action="store_true", help="machine-readable output")
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="alias for the default CI mode: non-zero exit on any failure "
+             "(the script already exits with the failure count, so --strict "
+             "is provided for symmetry with tools/upstream_sync.py)",
+    )
     args = parser.parse_args(argv)
 
     results = [fn() for fn in CHECKS]
