@@ -91,6 +91,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Run the release verifier
+        shell: bash
         run: |
           python tools/release_verify.py --tag "${{ inputs.tag || github.ref_name }}" \
             --repo "${{ github.repository }}" \
