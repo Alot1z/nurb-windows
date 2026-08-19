@@ -8,8 +8,6 @@ import os
 import pathlib
 import sys
 
-from .platform import home_dir
-
 PART_TEMPLATE = '''from nurb import *
 
 
@@ -270,24 +268,25 @@ def _artifact_size(path):
     return f"{n / 1e6:.1f}MB" if n >= 1e6 else f"{n / 1e3:.0f}kB"
 
 
-def cmd_mcp(args):
-    """Run the MCP stdio server so an MCP-capable agent can call nurb's own
-    commands. The tools are the CLI commands; see mcp.py for the boundaries."""
-    from . import mcp
-
-    mcp.main(["--project", args.project] if args.project else [])
-
-
 def cmd_export(args):
     from build123d import export_step
 
-    from . import builder, checks
+    from . import builder, checks, slicing
 
     root = project_root()
     formats = args.formats or _standing_formats(root) or list(DEFAULT_FORMATS)
     configs = _collect_exports(_resolve(root, args.part))
     out = root / "build"
     out.mkdir(exist_ok=True)
+    # A 3MF can carry the print settings the part justifies, but only a slicer knows
+    # this release's full config schema, so the upgrade needs one installed and a
+    # printer named. Missing either is not an error: the bare file is still correct,
+    # and one line says what the export is not carrying.
+    kit, bare_because = None, None
+    if "3mf" in formats:
+        kit, bare_because = slicing.kit(root)
+    if bare_because:
+        print(f"  3MF will carry geometry only: {bare_because}")
     queue = list(configs)
     while queue:
         path, name, overrides, ctx = queue.pop(0)
@@ -309,11 +308,20 @@ def cmd_export(args):
             continue
         for fmt in formats:
             target = out / f"{name}.{fmt}"
+            said = ""
             if fmt == "3mf":
                 try:
                     builder.write_3mf(shape, target)
                 except builder.BuildError as exc:
                     sys.exit(f"  {exc}")
+                if kit:
+                    settings, notes = slicing.tuned(shape, ctx)
+                    machine, process, filament, exe = kit
+                    try:
+                        slicing.write_project(target, target, machine, process, filament, exe, settings=settings)
+                        said = f"  {', '.join(notes)}"
+                    except slicing.Unavailable as exc:
+                        print(f"  {name}.3mf carries geometry only: {exc}")
             elif fmt == "stl":
                 builder.write_stl(shape, target)
             elif fmt == "step":
@@ -327,7 +335,7 @@ def cmd_export(args):
             note = _artifact_size(target)
             if fmt == "stl":
                 note += f", {builder.stl_triangles(target):,} triangles"
-            print(f"  {target.relative_to(root)}  {note}")
+            print(f"  {target.relative_to(root)}  {note}{said}")
         # A file this export did not rewrite still sits in build/ looking current,
         # and a stale STEP shared as fresh is worse than a missing one.
         for fmt in (f for f in FORMATS if f not in formats):
@@ -745,12 +753,9 @@ def skill_targets():
     """The two paths nurb's install flow writes the skill to.
 
     skills.sh's universal directory and the Claude fallback. Shared with the dev
-    server's staleness nudge so the two never check different paths. The home
-    comes from the platform layer: on Windows, HOME is respected when a shell
-    sets it (Git Bash) and USERPROFILE otherwise, so the same paths work in a
-    test that moves HOME and on a real machine.
+    server's staleness nudge so the two never check different paths.
     """
-    home = home_dir()
+    home = pathlib.Path.home()
     return [
         home / ".agents" / "skills" / "nurb" / "SKILL.md",
         home / ".claude" / "skills" / "nurb" / "SKILL.md",
@@ -775,7 +780,7 @@ def cmd_skill(args):
     if not args.sync:
         print(skill)
         return
-    home = home_dir()
+    home = pathlib.Path.home()
     targets = skill_targets()
     seen = set()
     found = False
@@ -792,11 +797,9 @@ def cmd_skill(args):
         if real.read_text(encoding="utf-8") != skill:
             real.write_text(skill, encoding="utf-8")
             state = "updated"
-        # as_posix so the path reads the same in Explorer and a terminal on
-        # Windows, where relative_to yields backslashes.
-        print(f"  ~/{target.relative_to(home).as_posix()}: {state}")
+        print(f"  ~/{target.relative_to(home)}: {state}")
     if not found:
-        print("  no installed skill found. install one: npx skills add shpigford/nurb")
+        print("  no installed skill found. install one: npx skills add shpigford/nurb --skill nurb")
 
 
 def cmd_update(args):
@@ -869,7 +872,7 @@ def cmd_slice(args):
     if exe is None:
         sys.exit(
             f"  no slicer found. `nurb slice` drives one you already have installed:\n"
-            f"  {' or '.join(slicing.SLICERS)}, {slicing.where_to_look()}.\n"
+            f"  {' or '.join(slicing.SLICERS)}, in /Applications, on PATH, or through Flatpak.\n"
             f"  `nurb export` writes the 3MF if you would rather open it yourself."
         )
     try:
@@ -879,8 +882,8 @@ def cmd_slice(args):
     if not wanted:
         sys.exit(
             "  no printer chosen, and a slice is meaningless without one.\n"
-            "  Name the machine once in printer.toml (`profile = \"bambu_a1_mini\"`),\n"
-            f"  in {checks.global_file()} for every project, or pass --printer.\n"
+            "  Name the machine once in printer.toml (`profile = \"bambu_a1_mini\"`)\n"
+            "  or in the per-user config file the platform layer reports, or pass --printer.\n"
             f"  have: {', '.join(sorted(checks.profiles()))}"
         )
     vendors = slicing.vendors(exe)
@@ -890,11 +893,12 @@ def cmd_slice(args):
             "so there is nothing to slice against"
         )
 
-    # No ctx: a slice is the machine's profile and the geometry, and the per-part check
-    # settings a card carries say nothing a slicer would read.
-    queue = [entry[:3] for entry in configs]
+    # The ctx rides along because `tuned` reads it: the same warp and stability
+    # thresholds that decide a brim in the exported 3MF decide it here, so the
+    # prediction describes the file `nurb export` hands out rather than a stock slice.
+    queue = list(configs)
     while queue:
-        path, name, overrides = queue.pop(0)
+        path, name, overrides, ctx = queue.pop(0)
         gcode_target = out / f"{name}.gcode"
         # Clear it before the build, profile lookup, or assembly branch: any of those
         # can fail or skip, and yesterday's printable file must not survive as current.
@@ -913,23 +917,24 @@ def cmd_slice(args):
             if not placed:
                 sys.exit(f"  {name} is an assembly that places no parts; nothing to slice")
             print(f"  {name}: slicing the {len(placed)} part(s) it places")
-            queue = [(p, p.stem, None) for p in placed] + queue
+            queue = [(p, p.stem, None, checks.from_card(p)) for p in placed] + queue
             continue
         out.mkdir(exist_ok=True)
         model = out / f"{name}.stl"
         builder.write_stl(shape, model)
+        settings, notes = slicing.tuned(shape, ctx)
         try:
             machine = slicing.machine(vendors, wanted, args.nozzle or slicing.NOZZLE)
             process, filament = slicing.profiles_for(machine, args.layer, args.filament)
             (seconds, grams), gcode = slicing.run(
-                model, gcode_target, machine, process, filament, exe, plate=args.plate
+                model, gcode_target, machine, process, filament, exe, plate=args.plate, settings=settings
             )
         except slicing.Unavailable as exc:
             print(f"  {name}: {exc}")
             worst = 1
             continue
         print(f"  {name}: {slicing.spoken(seconds)}, {slicing.weighed(grams)} of filament")
-        print(f"      {profile} / {process.stem} / {filament.stem} / {args.plate}")
+        print(f"      {profile} / {process.stem} / {filament.stem} / {args.plate} / {', '.join(notes)}")
         print(f"      {gcode.relative_to(root)}")
     if worst:
         sys.exit(worst)
@@ -1098,14 +1103,7 @@ def _is_free(port):
     import socket
 
     with socket.socket() as probe:
-        if os.name == "nt":
-            # SO_REUSEADDR on Windows lets a new socket bind over a live
-            # listener, which would report a busy port as free and send the
-            # second `nurb dev` into a bind failure instead of the "already
-            # serving" refusal. SO_EXCLUSIVEADDRUSE is the real probe.
-            probe.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
-        else:
-            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             probe.bind(("127.0.0.1", port))
             return True
@@ -1220,6 +1218,8 @@ def _write_launcher(root):
             newline="",
         )
     else:
+        # A login shell, because Finder's Terminal session does not carry the PATH a
+        # profile adds, and the double-click would die on `command not found: nurb`.
         file.write_text(
             "#!/bin/zsh -l\n"
             'cd "$(dirname "$0")"\n'
@@ -1402,10 +1402,6 @@ def main(argv=None):
         help=f"default: {' '.join(DEFAULT_FORMATS)}, or printer.toml's [export] formats. also: stl, step, glb",
     )
     s.set_defaults(fn=cmd_export)
-
-    s = sub.add_parser("mcp", help="serve nurb's commands over the Model Context Protocol (stdio)")
-    s.add_argument("--project", help="the nurb project to serve (default: the nearest project from cwd)")
-    s.set_defaults(fn=cmd_mcp)
 
     args = p.parse_args(argv)
     args.fn(args)

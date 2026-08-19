@@ -1,0 +1,5 @@
+# The tauri CLI rewrites Cargo.toml on every build, re-serializing it with LF
+# line endings. On a Windows checkout with core.autocrlf=true the worktree
+# file is CRLF, so the rewrite counts as a modification and trips the release
+# gate's clean-tree check. Pin TOML to LF everywhere so the rewrite is a no-op.
+*.toml text eol=lf

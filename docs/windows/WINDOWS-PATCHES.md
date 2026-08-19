@@ -81,6 +81,33 @@ keeps skill.md, SKILL.md, and the agents.md body from drifting.
 - `src/nurb/cli.py` writes `viewer.cmd` with `newline=""` and `open(..., "w", newline="")` so the launcher stays exactly CRLF instead of becoming CRCRLF on Windows text-mode writes; `nurb launcher` prints the Explorer double-click path.
 - The dev-server port probe uses `SO_EXCLUSIVEADDRUSE` on Windows (upstream's `SO_REUSEADDR` permits binding over a live listener there, so the "already serving" guard never fired).
 
+## Release-gate script
+
+`tools/release_gate.py` runs the post-PR release-readiness checks the
+maintainer was doing by hand in one invocation. It does not run pytest
+on purpose (the suite is ~8 minutes and lives in CI); it covers the cheap
+invariants instead: tracking hygiene (no private keys, no leaked
+private dev space), updater pin (no Shpigford endpoint, embedded pubkey
+matches committed key), the staging script parses, the build
+toolchain is reachable. Exit code is the count of failed checks; zero
+means the fork is ready for a release-gate PR.
+
+## Authenticode signing pipelined, certificate EXTERNAL
+
+`desktop/scripts/stage.py` now exposes `check_authenticode_signing()`,
+called from `__main__` after `main()` succeeds. Behavior is fully
+env-gated: when `NURB_WINDOWS_AUTHENTICODE_REQUIRED` is unset,
+authentiocde is a no-op (local dev builds do not sign); when set to
+`1`, signing must succeed. The pipeline reads the cert path from
+`NURB_WINDOWS_AUTHENTICODE_PFX`, an optional password from
+`NURB_WINDOWS_AUTHENTICODE_PFX_PASSWORD`, and the timestamp authority
+from `NURB_WINDOWS_AUTHENTICODE_TIMESTAMP_URL` (default DigiCert), and
+invokes `signtool sign /fd sha256 /td sha256` from the Windows SDK. A
+missing cert or missing `signtool.exe` fails loudly so the release
+pipeline never silently ships an unsigned executable when it asked for
+a signed one. The certificate itself is EXTERNAL: this repo never
+stores it, only references the path the CI environment passes in.
+
 ## Maintenance policy
 
 Prefer adding future Windows behavior behind platform boundaries instead of modifying upstream-core logic. Every new Windows-only deviation should be added here with a reason and merge strategy.
