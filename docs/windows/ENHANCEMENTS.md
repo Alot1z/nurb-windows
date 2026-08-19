@@ -139,3 +139,75 @@ Decision keys: **BUILD NOW** (clear value, low cost, no dependencies),
 | CI actionable summaries | BUILD NOW (this session: upstream-sync fix) |
 | Scheduled-sync conflict tracking | BUILD NOW — DONE |
 | Upstream-parity subagent | DO NOT BUILD into repo |
+
+## 9. Release artifact audit (was BUILD NEXT — now DONE)
+
+- **Problem**: nothing in CI proved the published installer, `.sig`, and
+  `latest.json` were what they claimed; a wrong upload shipped silently.
+- **Evidence**: the v0.21.0 release was verified by hand this session, and
+  the first automated check was this session's `tools/release_verify.py`.
+- **Solution**: `tools/release_verify.py` downloads the actual released
+  assets and verifies the minisign signature against the committed updater
+  key with the same decoding semantics the app uses (base64 envelope,
+  prehashed blake2b, Ed25519, global signature), plus version/url/signature
+  identity and SHA-256 provenance. Run from `windows-release` after
+  tauri-action attaches assets; the provenance JSON is uploaded as a
+  workflow artifact. Pure-Python Ed25519 keeps it dependency-free for CI.
+- **Coverage**: `tests/test_release_verify.py` (12 cases) pins the failure
+  modes: tampered artifact, wrong key, key-id mismatch, malformed metadata,
+  version/url drift, signature/asset disagreement, missing files,
+  idempotent re-check.
+- **Decision**: **BUILD NOW — DONE**; live-verified against the real
+  v0.21.0 and v0.20.1 releases and cross-checked against the Rust
+  `minisign-verify` crate and `cryptography`.
+
+## 10. Release orchestration (was the manual workflow_dispatch gap)
+
+- **Problem**: a release tag created by the publish workflow's own token
+  does not re-trigger tag-push workflows, so `windows-release` never ran
+  and the release shipped with no Windows artifacts until a human
+  dispatched it by hand.
+- **Evidence**: the v0.21.0 release had zero assets when the publish
+  workflow auto-created it; this session completed it via manual dispatch.
+- **Solution**: `publish.yml` now dispatches `windows-release.yml` at the
+  exact tag it just created (workflow_dispatch is the one event a
+  workflow-created token may trigger), with `actions: write` added to the
+  publish job. One release act produces the full artifact set.
+- **Decision**: **BUILD NOW — DONE**; the dispatch command was exercised
+  live against v0.21.0.
+
+## 11. ARM64 feasibility
+
+- **Problem**: is an ARM64 (aarch64-pc-windows-msvc) build possible?
+- **Evidence**: `desktop/scripts/stage.py` already names the
+  `uv-aarch64-pc-windows-msvc.exe` binary in `signable_targets`, so the
+  staging layer is ARM64-aware. The bundle config targets `nsis` with no
+  architecture pin; tauri can target `aarch64-pc-windows-msvc` given the
+  toolchain target installed. CI's windows-build pins
+  `x86_64-pc-windows-msvc` only.
+- **Assessment**: **FEASIBLE, DEFERRED**. The Rust toolchain, uv staging,
+  and NSIS bundling all support aarch64. What is unproven is a real ARM64
+  runner (windows-build runs on windows-latest x64) and a native WebView2
+  ARM64 test. The updater's latest.json already carries a
+  `windows-aarch64` platform entry, so the metadata side is ready.
+- **Decision**: **DEFER** until a native ARM64 test device exists; the
+  pipeline changes needed are mechanical (add the rust target, one
+  platform entry in the release job).
+
+## 12. Authenticode integration readiness
+
+- **Problem**: the installer has no Authenticode (SmartScreen) signature;
+  users see an unknown-publisher warning.
+- **Evidence**: `stage.py::check_authenticode_signing` is fully
+  implemented and env-gated: `NURB_WINDOWS_AUTHENTICODE_REQUIRED=1` forces
+  signing via `signtool.exe` with `NURB_WINDOWS_AUTHENTICODE_PFX` and an
+  optional timestamp URL (default DigiCert). The repo never stores cert
+  material. windows-build does not set the env vars, so today it is a
+  no-op print.
+- **Assessment**: **EXTERNAL, integration-ready**. The code path exists
+  and fails loud if asked to sign without material; what is missing is the
+  certificate (a purchased code-signing cert or an org CA), which no repo
+  change can provide. When the cert exists, setting the three env vars in
+  the windows-release workflow is the entire integration.
+- **Decision**: **EXTERNAL** (certificate); **integration-ready** once
+  the cert exists.
