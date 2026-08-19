@@ -3,7 +3,6 @@
 import asyncio
 import io
 import json
-import os
 import pathlib
 import threading
 import time
@@ -366,11 +365,7 @@ def test_export_confines_a_variant_filename_to_build(tmp_path):
     saved = pathlib.Path(json.loads(resp.body)["path"])
     assert resp.status_code == 200
     assert saved.parent == tmp_path / "build"
-    # The sanitizer folds every separator (on Windows the backslash is one too)
-    # into the filename; the file lands inside build/ or the route refuses.
-    from nurb.server import _export_name
-
-    assert saved.name == f"{_export_name(str(escaped))}.stl"
+    assert saved.name == f"{str(escaped).replace('/', '_').strip('._')}.stl"
     assert saved.is_file()
     assert not escaped.exists()
 
@@ -491,8 +486,7 @@ def test_upgrade_declines_outside_a_uv_tool_install(tmp_path):
 def test_upgrade_failure_reports_instead_of_restarting(tmp_path, monkeypatch):
     from nurb import server as server_mod
 
-    failure_command = ["cmd", "/C", "exit 1"] if os.name == "nt" else ["false"]
-    monkeypatch.setattr(server_mod, "_upgrade_command", lambda: failure_command)
+    monkeypatch.setattr(server_mod, "_upgrade_command", lambda: ["false"])
     execs = []
     monkeypatch.setattr("os.execv", lambda path, argv: execs.append(path))
     server = Server(tmp_path)
@@ -509,8 +503,7 @@ def test_upgrade_execs_the_same_argv_after_success(tmp_path, monkeypatch):
 
     from nurb import server as server_mod
 
-    success_command = ["cmd", "/C", "exit 0"] if os.name == "nt" else ["true"]
-    monkeypatch.setattr(server_mod, "_upgrade_command", lambda: success_command)
+    monkeypatch.setattr(server_mod, "_upgrade_command", lambda: ["true"])
     execs = []
     monkeypatch.setattr("os.execv", lambda path, argv: execs.append((path, argv)))
     server = Server(tmp_path)
