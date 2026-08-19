@@ -131,15 +131,21 @@ fn resources(app: &tauri::AppHandle) -> Result<Resources, String> {
     let adapter_package = dir.join("adapter-package.json");
     let adapter_lock = dir.join("adapter-package-lock.json");
     let adapter_lock_hash = file_hash(&adapter_lock, "adapter lock")?;
+    // Pick the newest bundled wheel, never the first the filesystem yields.
+    // An in-place upgrade leaves the previous release's wheel behind (NSIS
+    // does not clean resources on install-over), so without a deterministic
+    // choice a stale nurb-0.20.1 wheel could shadow nurb-0.21.0 and the app
+    // would keep its old engine forever while calling itself the new version.
     let wheel = std::fs::read_dir(&dir)
         .map_err(|e| format!("cannot read {}: {e}", dir.display()))?
         .filter_map(|entry| entry.ok())
         .map(|entry| entry.path())
-        .find(|path| {
+        .filter(|path| {
             path.file_name()
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| name.starts_with("nurb-") && name.ends_with(".whl"))
         })
+        .max_by_key(|path| wheel_version_key(path))
         .ok_or_else(|| format!("no nurb wheel bundled in {}", dir.display()))?;
     let wheel_hash = file_hash(&wheel, "wheel")?;
     Ok(Resources {
@@ -375,6 +381,17 @@ fn wheel_version(name: &str) -> Option<&str> {
         .strip_suffix(".whl")?
         .split('-')
         .next()
+}
+
+/// A sortable version key for a wheel path: numeric components, so 0.10.0
+/// sorts after 0.9.0 (lexicographic string order would get that wrong).
+fn wheel_version_key(path: &std::path::Path) -> Option<(u64, u64, u64)> {
+    let version = wheel_version(path.file_name()?.to_str()?)?;
+    let mut parts = version.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let patch = parts.next()?.parse().ok()?;
+    Some((major, minor, patch))
 }
 
 /// The OCCT version behind the pinned OCP wheels: `cadquery-ocp-novtk==7.9.3.1.1`
@@ -750,7 +767,10 @@ mod tests {
     use std::process::Command;
     use std::time::Duration;
 
-    use super::{file_hash, occt_version, probe_version, wheel_version, NPM_CI_ARGS, PROBE_ID};
+    use super::{
+        file_hash, occt_version, probe_version, wheel_version, wheel_version_key, NPM_CI_ARGS,
+        PROBE_ID,
+    };
     use crate::env::Paths;
 
     /// A command that prints `text`, on any platform.
@@ -795,6 +815,39 @@ mod tests {
         );
         assert_eq!(wheel_version("requirements.lock"), None);
         assert_eq!(wheel_version("nurb-0.10.0.tar.gz"), None);
+    }
+
+    #[test]
+    fn newest_wheel_wins_after_an_in_place_upgrade() {
+        // An upgrade leaves the old release's wheel in resources (NSIS does
+        // not clean it), and read_dir order is not defined. The pick must be
+        // deterministic and version-ordered, or a stale wheel shadows the new
+        // one and the app keeps its old engine. 0.10.0 vs 0.9.0 also guards
+        // against a lexicographic comparison, which would get that wrong.
+        let dir = std::env::temp_dir().join(format!("nurb-wheel-pick-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for name in [
+            "nurb-0.9.0-py3-none-any.whl",
+            "nurb-0.10.0-py3-none-any.whl",
+        ] {
+            std::fs::write(dir.join(name), b"wheel").unwrap();
+        }
+        let picked = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with("nurb-") && name.ends_with(".whl"))
+            })
+            .max_by_key(|path| wheel_version_key(path))
+            .unwrap();
+        assert_eq!(
+            picked.file_name().unwrap().to_str().unwrap(),
+            "nurb-0.10.0-py3-none-any.whl"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

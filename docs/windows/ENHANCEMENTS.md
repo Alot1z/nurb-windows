@@ -261,3 +261,74 @@ Decision keys: **BUILD NOW** (clear value, low cost, no dependencies),
 - **Decision**: **N-A** (repair mode does not exist in NSIS installers;
   reinstall-in-place is the supported recovery path, documented here so a
   future session does not search for a repair button).
+
+## 16. CI install smoke test on every Windows release
+
+- **Problem**: a release whose installer cannot install, or whose app cannot
+  start, would still ship. The build only proves the artifact compiles; it
+  never proves the artifact installs.
+- **Fix**: `windows-release.yml` gained a `smoke` job that runs after the
+  Windows build: it downloads the **released** installer (never the workspace
+  copy), silent-installs into a scratch dir that deliberately contains a
+  space, verifies the version resource and the file layout, launches the app,
+  and requires the main process plus its WebView2 child to stay alive. A
+  failure anywhere fails the workflow, so the gate is real.
+- **Evidence** (live, this session): the exact pwsh sequence was run locally
+  against the real v0.21.0 installer before being committed: install exit 0,
+  FileVersion 0.21.0, layout OK, `SMOKE OK: nurb.exe alive with WebView2
+  child`. The install form `cmd /c "<setup> /S /D=<dir>"` is the proven one;
+  an earlier variant with inner quotes around the setup path fails under
+  `cmd /c` quote-stripping, which is why the step is written the way it is.
+- **Decision**: **VERIFIED COMPLETE** (smoke test gates every release; the
+  full updater E2E stays manual by design).
+
+## 17. In-place upgrade inside a spaced+Unicode install dir, and the stale-wheel bug it found
+
+- **Problem**: the real upgrade hazard is the old app running while the new
+  installer tries to replace locked files, and doing that from a directory
+  whose path contains spaces and non-ASCII characters (`Nürb 测试`).
+- **Evidence** (live, this session): v0.20.1 was silent-installed into
+  `E:\space-agent\temp\upgrade test\Nürb 测试\` and launched (PID captured);
+  the v0.21.0 installer then ran over it. Exit 0, the installer terminated
+  the running old process cleanly, and the file version became 0.21.0. The
+  upgraded app launched and ran.
+- **Bug found on the same path**: after the in-place upgrade, `resources/`
+  contains **both** wheels (NSIS does not clean resources on install-over),
+  and `resources()` picked the wheel with `read_dir().find()` with no sort,
+  so the filesystem order decided which wheel the app provisioned. On this
+  machine the stale nurb-0.20.1 wheel won, `provisioned.json` recorded its
+  hash, and the stamp matched, so the app stayed on the old engine forever
+  while calling itself 0.21.0. Verified by reading the provisioned env's
+  `nurb --version` (0.20.1) and matching the stamp hash to the stale wheel.
+- **Fix**: `resources()` now picks the **newest** wheel by parsed numeric
+  version (`max_by_key` over `(major, minor, patch)`), never the first the
+  filesystem yields. Lexicographic ordering would misorder 0.10.0 vs 0.9.0,
+  so the comparison is numeric. Regression test
+  `newest_wheel_wins_after_an_in_place_upgrade` pins it. (A test-only compile
+  error in `extensions.rs`'s launch-template test surfaced while running the
+  suite; fixed with a one-character deref. This was pre-existing code that
+  `cargo check` never compiled because it lives behind `#[cfg(test)]`.)
+- **Decision**: **VERIFIED COMPLETE** (upgrade path proven; stale-wheel bug
+  fixed with a regression test; the fix ships in the next release build).
+
+## 18. Backend startup after fresh provisioning
+
+- **Problem**: does the provisioned engine actually serve a project, or does
+  provisioning stamp health without a working dev server?
+- **Evidence** (live, this session): after fresh provisioning, a scratch
+  project was created and the backend started exactly as the Supervisor does
+  (`nurb dev --port 7373` from the project dir, using the provisioned
+  launcher). HTTP 200 on the dev port with the parts API responding.
+- **Decision**: **VERIFIED COMPLETE** (fresh provisioned engine serves a
+  project end to end).
+
+## 19. MSI/WiX installer
+
+- **Problem**: would an MSI give repair/AD/GPO features the NSIS installer
+  lacks?
+- **Evidence**: the NSIS installer is proven across install, upgrade,
+  uninstall, spaced/Unicode paths, and the updater; MSI would be a full
+  installer rewrite with its own servicing semantics, and nothing in the
+  current release lifecycle needs it.
+- **Decision**: **DEFERRED** (NSIS proven; MSI is a rewrite with no current
+  requirement driving it).

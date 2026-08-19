@@ -343,7 +343,7 @@ mod tests {
         for manifest in BUILTIN.iter() {
             for arg in manifest.launch {
                 if arg.contains('{') {
-                    assert_eq!(arg, "{project}");
+                    assert_eq!(*arg, "{project}");
                 }
             }
         }
