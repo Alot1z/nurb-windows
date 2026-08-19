@@ -13,13 +13,6 @@ dist-ssr
 *.local
 .env
 
-# Updater signing: the private key never enters the repo. The public key
-# (tauri-updater.key.pub) is committed and referenced by tauri.conf.json;
-# the matching private key lives in GitHub secrets as
-# TAURI_SIGNING_PRIVATE_KEY / TAURI_SIGNING_PRIVATE_KEY_PASSWORD.
-signing/tauri-updater.key
-signing/*.password
-
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -30,3 +23,10 @@ signing/*.password
 *.njsproj
 *.sln
 *.sw?
+
+# Updater signing: the private key never enters the repo. The public key
+# (tauri-updater.key.pub) is committed and referenced by tauri.conf.json;
+# the matching private key lives in GitHub secrets as
+# TAURI_SIGNING_PRIVATE_KEY / TAURI_SIGNING_PRIVATE_KEY_PASSWORD.
+signing/tauri-updater.key
+signing/*.password
