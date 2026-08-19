@@ -69,7 +69,7 @@ jobs:
             ```
             __DRIFT__
             ```
-            '@
+          '@
             $body = $body.Replace('__HEAD__', $head_short).Replace('__BEHIND__', $behind)
             $body = $body.Replace('__UP__', $up_short)
             $body = $body.Replace('__REPO__', "${{ github.repository }}").Replace('__RUN__', "${{ github.run_id }}")
