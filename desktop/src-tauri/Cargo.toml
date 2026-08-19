@@ -29,6 +29,12 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"
 libc = "0.2"
+# The Gemini API key goes in the OS credential store (Windows Credential
+# Manager here, macOS Keychain upstream): a secret must never live in app
+# preferences, and the crate is the cross-platform way to keep the same
+# semantics on both. Upstream shells out to /usr/bin/security, which is
+# macOS-only; keyring gives Windows a real store instead of a broken path.
+keyring = "3"
 agent-client-protocol = "2.0.0"
 tokio = { version = "1", features = ["rt", "process", "io-util", "sync", "macros", "time"] }
 async-process = "2"
