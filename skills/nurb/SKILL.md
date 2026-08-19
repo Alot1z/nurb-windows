@@ -79,7 +79,7 @@ nurb slice [part]     print time and filament, from the slicer already installed
 nurb stress [part]    where a load stresses the part: peak MPa, sag, margin to breaking; --kg, --at/--hold x,y,z
 nurb verify [part]    the doctrine's verification list: solids, flex, checks, card. --report bundles verdict and renders into build/renders/
 nurb render [part]    PNG into build/renders/, so you can look at what you made; --section z:4mm cuts it open
-nurb export [part]    3MF with tuned print settings into build/, --formats for STL, STEP or GLB
+nurb export [part]    3MF into build/, --formats for STL, STEP or GLB
 nurb extract          find duplication across parts
 nurb dev              watch, rebuild, serve the viewer on :7373 or the next free port
 nurb launcher         rewrite viewer.command, the double-clickable `nurb dev` a project is born with
