@@ -75,4 +75,19 @@ jobs:
           path: desktop/src-tauri/target/release/bundle/nsis/*.exe
           if-no-files-found: error
       - name: Upstream sync audit
-        run: python tools/upstream_sync.py status
+        # --strict fails the build when SAFE-zone paths (src/nurb/, tests/,
+        # examples/, skills/, evals/) differ from upstream while the fork is
+        # behind or diverged. Pure-ahead (fork-only SAFE patches) stays open
+        # so platform/ additions and cli.py Windows patches don't redline the
+        # release. The corresponding unit tests live in
+        # tests/test_upstream_sync.py.
+        run: python tools/upstream_sync.py status --strict
+      - name: Release gate
+        # Mirrors the local `tools/release_gate.py` checks in CI:
+        # clean tree on the merge commit, no tracked signing material,
+        # updater pinned to this fork, embedded pubkey matches the
+        # committed .key.pub. Fails loud if any invariant breaks.
+        # Re-runs release_gate.py on the freshly checked-out clean tree,
+        # so a polluted PR cannot slip through.
+        run: python tools/release_gate.py --strict
+

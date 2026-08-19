@@ -1123,9 +1123,10 @@ def global_file():
     here instead of in every printer.toml. Same schema as printer.toml, read fresh
     each call because tests move it with XDG_CONFIG_HOME.
     """
-    from .platform.paths import user_config_dir
+    import os
 
-    return user_config_dir() / "config.toml"
+    base = os.environ.get("XDG_CONFIG_HOME") or pathlib.Path.home() / ".config"
+    return pathlib.Path(base) / "nurb" / "config.toml"
 
 
 def _read_toml(file, label):
