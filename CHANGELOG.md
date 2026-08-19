@@ -181,7 +181,7 @@ additive — all of which is preserved under the following headings.
 ## Upstream v0.21.0 merge — complete
 
 Upstream `main` at `d8164e6` (v0.21.0, "Embed part-driven print settings in
-  exported 3MFs") has been merged into the fork and the strict gate is green:
+exported 3MFs") has been merged into the fork and the strict gate is green:
 `tools/upstream_sync.py status --strict` exits 0, the release gate reads
 READY, and the fork's merge base is upstream HEAD, so there is zero pending
 merge debt until upstream moves again.
