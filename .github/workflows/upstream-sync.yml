@@ -51,21 +51,29 @@ jobs:
             $drift = (uv run --project . python tools/upstream_sync.py status 2>$null) `
                      | Select-String -Pattern '^(SAFE|REVIEW|WINDOWS-SPECIFIC):' `
                      | ForEach-Object { $_.ToString().Trim() }
-            $title = "Upstream sync conflict ($head_short ← upstream/main, $behind commits)"
-            $body = @"
+            $title = "Upstream sync conflict ($head_short <-- upstream/main, $behind commits)"
+            # Single-quoted here-string: no backtick escapes, no interpolation,
+            # so Markdown backticks stay literal (a double-quoted here-string
+            # would read `u in `upstream as an invalid unicode escape). Values
+            # are spliced in below with .Replace().
+            $body = @'
             Scheduled upstream sync detected an unrecoverable conflict.
 
-            - fork at `$head_short` is `$behind` commits behind `upstream/main` (`$up_short`)
-            - run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            - fork at __HEAD__ is __BEHIND__ commits behind `upstream/main` (__UP__)
+            - run: https://github.com/__REPO__/actions/runs/__RUN__
             - next step: see `docs/windows/PORTING-MERGE-CHECKLIST.md` for the merge
               protocol and `docs/windows/UPSTREAM-SYNC.md` for strict-gate semantics.
 
             Current drift classification:
 
             ```
-            $(($drift -join "`n"))
+            __DRIFT__
             ```
-            "@
+            '@
+            $body = $body.Replace('__HEAD__', $head_short).Replace('__BEHIND__', $behind)
+            $body = $body.Replace('__UP__', $up_short)
+            $body = $body.Replace('__REPO__', "${{ github.repository }}").Replace('__RUN__', "${{ github.run_id }}")
+            $body = $body.Replace('__DRIFT__', ($drift -join [Environment]::NewLine))
             gh issue create --title $title --body $body --label "upstream-sync" 2>$null
             if ($LASTEXITCODE -ne 0) {
               # Issues disabled: keep one persistent tracker PR instead.
