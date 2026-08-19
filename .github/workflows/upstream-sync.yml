@@ -27,6 +27,8 @@ jobs:
       - name: Prepare synchronization branch when needed
         id: sync
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           $behind = [int](git rev-list --count HEAD..upstream/main)
           "behind=$behind" >> $env:GITHUB_OUTPUT
@@ -35,11 +37,55 @@ jobs:
             exit 0
           }
           $branch = "upstream-sync/$((git rev-parse --short upstream/main))"
+          $head_short = (git rev-parse --short HEAD)
+          $up_short = (git rev-parse --short upstream/main)
           git switch -C $branch
           git merge --no-commit --no-ff upstream/main
           if ($LASTEXITCODE -ne 0) {
+            # Conflict path: open a tracking issue when the repo has issues
+            # enabled; otherwise fall back to a persistent conflict-tracker PR
+            # carrying UPSTREAM-CONFLICT.md. The run still fails loudly so the
+            # scheduled check stays meaningful, and the tracker points here.
             git merge --abort
-            throw 'Upstream merge has conflicts; leaving the PR for manual preparation.'
+            Write-Host "Upstream merge has conflicts; opening tracking issue."
+            $drift = (uv run --project . python tools/upstream_sync.py status 2>$null) `
+                     | Select-String -Pattern '^(SAFE|REVIEW|WINDOWS-SPECIFIC):' `
+                     | ForEach-Object { $_.ToString().Trim() }
+            $title = "Upstream sync conflict ($head_short ← upstream/main, $behind commits)"
+            $body = @"
+            Scheduled upstream sync detected an unrecoverable conflict.
+
+            - fork at `$head_short` is `$behind` commits behind `upstream/main` (`$up_short`)
+            - run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            - next step: see `docs/windows/PORTING-MERGE-CHECKLIST.md` for the merge
+              protocol and `docs/windows/UPSTREAM-SYNC.md` for strict-gate semantics.
+
+            Current drift classification:
+
+            ```
+            $(($drift -join "`n"))
+            ```
+            "@
+            gh issue create --title $title --body $body --label "upstream-sync" 2>$null
+            if ($LASTEXITCODE -ne 0) {
+              # Issues disabled: keep one persistent tracker PR instead.
+              Write-Host 'Issues disabled; maintaining the conflict-tracker PR.'
+              git switch -C upstream-sync/conflict-tracker
+              Set-Content -Path UPSTREAM-CONFLICT.md -Value $body -Encoding utf8
+              git add UPSTREAM-CONFLICT.md
+              git commit -m "Record upstream sync conflict against $up_short" 2>$null
+              git push --force origin upstream-sync/conflict-tracker 2>$null
+              $existing = gh pr list --repo ${{ github.repository }} `
+                          --head upstream-sync/conflict-tracker --json number `
+                          --jq '.[0].number' 2>$null
+              if ($existing) {
+                gh pr edit $existing --title $title --body $body 2>$null
+              } else {
+                gh pr create --base main --head upstream-sync/conflict-tracker `
+                             --title $title --body $body 2>$null
+              }
+            }
+            throw 'Upstream merge has conflicts; see the tracker opened above.'
           }
           git commit -m 'Sync upstream nurb'
           git push --force-with-lease origin $branch
