@@ -6,6 +6,13 @@ name: windows-release
 # (`releases/latest/download/latest.json`) serves.
 #
 # Runs on the vX.Y.Z tag created by the publish workflow on a version bump.
+# A tag created by a workflow's own GITHUB_TOKEN does not re-trigger
+# tag-push workflows, so a publish that auto-creates the release leaves it
+# without Windows artifacts. workflow_dispatch with a tag input is the manual
+# completion path (and the rebuild path for a botched release): run it from
+# main with tag=vX.Y.Z and it builds from the tag's commit, then attaches the
+# installer, .sig, and latest.json to that release.
+#
 # Requires two repository secrets, one per environment that builds:
 #   TAURI_SIGNING_PRIVATE_KEY           the updater private key contents
 #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  the key's password
@@ -17,6 +24,12 @@ name: windows-release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build and attach artifacts to (e.g. v0.21.0)"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -55,8 +68,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: desktop
-          tagName: ${{ github.ref_name }}
-          releaseName: ${{ github.ref_name }}
+          tagName: ${{ inputs.tag || github.ref_name }}
+          releaseName: ${{ inputs.tag || github.ref_name }}
           releaseBody: "See the GitHub release for details."
           releaseDraft: false
           prerelease: false
