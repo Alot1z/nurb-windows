@@ -20,8 +20,9 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
-tauri-plugin-opener = "2"
+tauri-plugin-clipboard-manager = "2"
 tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
 tauri-plugin-process = "2"
 tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
@@ -43,5 +44,3 @@ trash = "5"
 # extension system needs to host interactive CLIs as real terminals.
 # Byte transport only; see terminal.rs for the contract.
 portable-pty = "0.8"
-tauri-plugin-clipboard-manager = "2"
-

@@ -25,7 +25,23 @@ def classify(path: str) -> str:
     if path.startswith(REVIEW_PREFIXES): return 'REVIEW'
     return 'REVIEW'
 
-def status() -> int:
+
+def safe_drift_paths(changed: list[str]) -> list[str]:
+    """The SAFE-zone paths that differ from upstream. Extracted so the gate's
+    decision is testable without invoking git on the live tree."""
+    return [p for p in changed if classify(p) == 'SAFE']
+
+
+def strict_should_fail(base_sha: str, remote_sha: str, safe_drift: list[str]) -> bool:
+    """Pure-ahead means every drift hunk is the fork's own intentional
+    evolution (added platform/, patched cli.py, etc.); not gating on it keeps
+    fork-native work flowing. Behind or diverged against upstream while SAFE
+    drifted means we are releasing on top of SAFE code we have not pulled in.
+    """
+    pure_ahead = base_sha == remote_sha
+    return (not pure_ahead) and bool(safe_drift)
+
+def status(strict: bool = False) -> int:
     ensure_upstream()
     run('git', 'fetch', UPSTREAM, 'main', '--prune')
     local = run('git', 'rev-parse', 'HEAD')
@@ -52,6 +68,19 @@ def status() -> int:
         if paths:
             print(f'\n{group}:')
             for path in paths: print(f'  {path}')
+    if strict and changed:
+        # Decision lives in strict_should_fail so it can be unit-tested.
+        safe_drift = safe_drift_paths(changed)
+        if strict_should_fail(base, remote, safe_drift):
+            print(
+                f'\nstrict: {len(safe_drift)} SAFE-zone path(s) drift against '
+                f'upstream while fork is behind or diverged. Merge upstream '
+                f'before releasing.',
+                file=__import__('sys').stderr,
+            )
+            for path in safe_drift:
+                print(f'  - {path}', file=__import__('sys').stderr)
+            return 1
     return 0
 
 def prepare() -> int:
@@ -68,8 +97,17 @@ def prepare() -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description='Maintain the Windows fork against upstream nurb.')
     parser.add_argument('command', choices=('status', 'prepare'))
+    parser.add_argument(
+        '--strict',
+        action='store_true',
+        help='Exit non-zero when SAFE-zone paths differ from upstream while '
+             'the fork is behind or diverged. Intended for CI; local dev '
+             'leaves it off so fork-native SAFE patches do not flag.',
+    )
     args = parser.parse_args()
-    return status() if args.command == 'status' else prepare()
+    if args.command == 'status':
+        return status(strict=args.strict)
+    return prepare()
 
 if __name__ == '__main__':
     raise SystemExit(main())
