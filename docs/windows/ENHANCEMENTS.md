@@ -211,3 +211,53 @@ Decision keys: **BUILD NOW** (clear value, low cost, no dependencies),
   the windows-release workflow is the entire integration.
 - **Decision**: **EXTERNAL** (certificate); **integration-ready** once
   the cert exists.
+
+## 13. Windows torture/regression — spaced & Unicode install paths
+
+- **Problem**: the mission names Windows-specific torture cases as required;
+  unproven was whether the real installer and app survive an install path
+  with spaces and non-ASCII characters.
+- **Evidence** (live, this session, against the released v0.21.0 installer):
+  silent install into `E:\space agent test\Nürb 测试\` succeeded; the app
+  launched from that path (main + WebView2 processes, backend HTTP 200 on
+  the pinned port); and the updater endpoint resolved from that install —
+  with the check-cache marker deleted, the v0.20.1 app launched from a
+  spaced/Unicode path wrote a fresh marker naming `0.21.0`, proving its own
+  updater fetched and parsed the live latest.json. `tools/release_verify.py`
+  verified the release from a spaced/Unicode scratch dir, and
+  `desktop/scripts/stage.py` passes paths as list args (never through a
+  shell), so staging/signing are safe there too.
+- **Regression test**: `test_spaced_and_unicode_paths_still_verify` builds
+  the fixture under `space agent test/Nürb 测试/` and runs the verifier as a
+  subprocess, pinning the no-shell property.
+- **Decision**: **VERIFIED COMPLETE**; one small regression test added.
+
+## 14. Fresh install from a clean user profile
+
+- **Problem**: does first-run provisioning actually complete on a machine
+  that has never run the app?
+- **Evidence** (live, this session): deleted the app's `%APPDATA%` and
+  `%LOCALAPPDATA%` directories, installed v0.21.0 fresh, launched it.
+  Provisioning completed from scratch: `provisioned.json` written with all
+  required fields (wheel lock, node v24.19.0, both adapter pins, adapter
+  lock), ~35k provisioned files across env/python/node/adapters, app process
+  running and responding with WebView2 up. The backend dev server spawns per
+  project by design (Supervisor), so a fresh profile with no open project
+  has no listener until one is opened; that is architecture, not a gap.
+- **Decision**: **VERIFIED COMPLETE** (provisioning); backend-on-demand
+  confirmed by design.
+
+## 15. NSIS repair mode
+
+- **Problem**: can a broken install be repaired through the installer, or
+  does Windows offer Modify/Repair?
+- **Evidence** (live, this session): the installed app's uninstall registry
+  key reports `NoModify: 1` and `NoRepair: 1` with no `ModifyPath` or
+  `RepairString`, so Windows shows no Repair/Modify entry. The tauri NSIS
+  template defines no repair page. The equivalent recovery path that does
+  exist is reinstall-in-place: running the v0.21.0 installer over an
+  existing install replaces the files and preserves user data (proven in
+  the updater-lifecycle test, v0.20.1 -> v0.21.0 in place).
+- **Decision**: **N-A** (repair mode does not exist in NSIS installers;
+  reinstall-in-place is the supported recovery path, documented here so a
+  future session does not search for a repair button).
