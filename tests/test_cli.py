@@ -1,5 +1,6 @@
 """Configuration-set validation happens before artifact writes."""
 
+import os
 import pathlib
 import re
 import subprocess
