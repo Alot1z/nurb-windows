@@ -332,3 +332,57 @@ Decision keys: **BUILD NOW** (clear value, low cost, no dependencies),
   current release lifecycle needs it.
 - **Decision**: **DEFERRED** (NSIS proven; MSI is a rewrite with no current
   requirement driving it).
+
+## 20. About-box wheel pick, CI Rust suite, and release artifact privacy
+
+- **Problem (About box)**: `about_info()` picked the bundled wheel with the
+  same non-deterministic `read_dir` order as `resources()` did, so after an
+  in-place upgrade the About box could report the old engine version while
+  the app ran the new one.
+- **Fix**: one shared `newest_wheel()` helper now serves both `resources()`
+  and `about_info()`, returning the highest parsed numeric version and
+  failing on an empty dir. The regression test now exercises the helper
+  itself, including the empty-dir error.
+- **Problem (CI gap)**: `npm test` only runs the desktop Node suite; the
+  Rust crate's 48 tests (including the wheel-pick regression) never ran on
+  GitHub, so the fix could silently regress.
+- **Fix**: `windows-build.yml` runs `cargo test --lib` before the release
+  build; the toolchain is already installed for that job and the debug
+  profile is a fraction of the release build.
+- **Evidence (artifact privacy)**: the actually released v0.21.0 installer
+  (19,749,831 bytes) was scanned for private scratch markers, private-key
+  markers, tokens, and bearer/API-key patterns: zero hits. `latest.json` is
+  well-formed with both platform keys pointing at the same verified
+  installer, and its `pub_date` (15:36:19Z) matches the CI smoke job's
+  download of the same bytes (15:36:33Z), so the metadata describes the
+  artifact the smoke test installed.
+- **Decision**: **VERIFIED COMPLETE** (both fixes in `fe200cf`, privacy
+  scan clean, live release still verifies against the committed key).
+
+## 21. Upstream v0.22.0 reconciliation (Gemini support)
+
+- **Trigger**: upstream released v0.22.0 (Gemini support, viewer-driven
+  variant card params, release bump) while CI ran; the strict sync gate went
+  red as designed (26 SAFE-zone paths, fork 3 behind and diverged).
+- **Merge**: `19a524e` (merge commit) plus the version fix. Five content
+  conflicts, all resolved per the checklist:
+  - `desktop/README.md` — ADAPT: upstream's Gemini paragraph with the fork's
+    `%APPDATA%` paths and stage.py wording.
+  - `desktop/src-tauri/tauri.conf.json` — PORT the version to 0.22.0 (the
+    fork's release line follows upstream), KEEP the fork identifier
+    `dev.alot1z.nurb.windows` and the fork's updater pubkey/endpoints.
+  - `desktop/src/App.tsx` — ADAPT: upstream's GeminiKeyDialog state beside
+    the fork's developer extension surface.
+  - `desktop/src-tauri/src/acp.rs` — ADAPT: upstream's `authenticate`
+    command with the fork's `process` module.
+  - `desktop/src-tauri/src/agents.rs` — ADAPT: upstream's Gemini credential
+    storage used macOS-only `/usr/bin/security`, which would break the
+    Windows build at runtime. Replaced with the `keyring` crate (Windows
+    Credential Manager here, macOS Keychain upstream), same service/account
+    naming; the dead keychain test became a line-break validation test.
+- **Verification**: cargo test 49/49, Node tests 7/7, tsc clean, strict sync
+  gate exit 0 (fork fully merged), version-consistency test green, 587 passed
+  / 8 skipped on the Python suite (the single pre-fix failure was the version
+  drift this merge caused, fixed by the PORT decision above).
+- **Decision**: **VERIFIED COMPLETE** (fork now carries v0.22.0 with the
+  Gemini feature working on Windows).
