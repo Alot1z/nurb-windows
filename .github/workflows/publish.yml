@@ -32,6 +32,7 @@ jobs:
     permissions:
       id-token: write # trusted publishing: the OIDC exchange is the credential
       contents: write # the tag and the release
+      actions: write # dispatch windows-release for the new tag
     steps:
       - uses: actions/checkout@v4
 
@@ -66,3 +67,18 @@ jobs:
           gh release create "v${{ steps.version.outputs.version }}" \
             --title "v${{ steps.version.outputs.version }}" \
             --generate-notes
+
+      # The tag this step just created was made by this workflow's own token,
+      # so GitHub deliberately does not re-trigger the tag-push workflows. The
+      # Windows installer, .sig, and latest.json would therefore never get
+      # built. workflow_dispatch is the exception to that rule, so dispatch the
+      # windows-release workflow at the exact tag: one release act now produces
+      # the full artifact set without a human remembering to do it.
+      - name: Dispatch the Windows release build for this tag
+        if: steps.tagged.outputs.done != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run windows-release.yml \
+            --ref "v${{ steps.version.outputs.version }}" \
+            --field tag="v${{ steps.version.outputs.version }}"

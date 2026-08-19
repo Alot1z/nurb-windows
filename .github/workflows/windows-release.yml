@@ -80,3 +80,24 @@ jobs:
           # updater endpoint is pinned to that file on Alot1z/nurb-windows.
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
+
+      # Verify the artifacts as released, not as built: download the actual
+      # installer, .sig, and latest.json from the release and check the
+      # minisign signature against the committed updater key with the same
+      # decoding semantics the app uses, plus version/url/signature identity.
+      # A broken upload fails the workflow instead of shipping to updaters.
+      - name: Verify the released artifacts cryptographically
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run the release verifier
+        run: |
+          python tools/release_verify.py --tag "${{ inputs.tag || github.ref_name }}" \
+            --repo "${{ github.repository }}" \
+            --out "${{ runner.temp }}/release-provenance.json"
+      - name: Upload the provenance record
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-provenance
+          path: ${{ runner.temp }}/release-provenance.json
+          if-no-files-found: error
