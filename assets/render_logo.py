@@ -6,12 +6,32 @@ The output mirrors the existing ASCII block at the top of README.md in visual
 weight: a centered horizontal strip measured to roughly the same on-screen
 footprint, with the same chrome around it (badge row, figure row). No element
 is decorative; every component is load-bearing.
+
+The spec line carries the package version and the current build SHA so the
+mark never advertises a stale release; both are read at render time rather
+than hardcoded.
 """
 
+import subprocess
+import tomllib
 from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
+
+
+def package_version() -> str:
+    """The version pyproject.toml pins, so the mark tracks releases."""
+    root = Path(__file__).resolve().parents[1]
+    with open(root / "pyproject.toml", "rb") as fh:
+        return tomllib.load(fh)["project"]["version"]
+
+
+def build_sha() -> str:
+    """The short HEAD SHA, so the mark identifies the exact build it shipped in."""
+    return subprocess.check_output(
+        ["git", "rev-parse", "--short", "HEAD"], text=True
+    ).strip()
 
 # ---------- canvas ---------------------------------------------------------
 
@@ -196,7 +216,7 @@ def render_typography(canvas: Image.Image) -> Image.Image:
            fill=MANGANESE + (255,))
 
     # tiny spec line, mono, centered below the mark block, dim
-    spec_line = "agentic cad · occt-backed · windows 10/11 x64 · v0.20.1"
+    spec_line = f"agentic cad · occt-backed · windows 10/11 x64 · v{package_version()}"
     sw_spec, sh_spec, _, _ = textbox(spec_line, mono_font)
     sx = (W - sw_spec) // 2
     sy = y0 + max(mh, sh) + 26
@@ -204,7 +224,7 @@ def render_typography(canvas: Image.Image) -> Image.Image:
 
     # right-corner region label (fiducial-style)
     mono_small = font("JetBrainsMono-Bold.ttf", 13)
-    d.text((W - 360, H - 28), "build · 240b736 · strict gate ✓",
+    d.text((W - 360, H - 28), f"build · {build_sha()} · strict gate ✓",
            font=mono_small, fill=TYPOGRAPHY_DIM + (190,))
     d.text((40, H - 28), "channel · nurb-windows · signed",
            font=mono_small, fill=TYPOGRAPHY_DIM + (190,))
