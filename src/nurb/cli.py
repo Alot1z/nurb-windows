@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import errno
 import importlib.metadata
+import os
 import pathlib
 import sys
 
@@ -1201,25 +1202,38 @@ def cmd_dev(args):
         sys.exit(f"  port {port} was taken between checking it and binding it. Try again.")
 
 
-LAUNCHER = "viewer.command"
+LAUNCHER = "viewer.cmd" if os.name == "nt" else "viewer.command"
 
 
 def _write_launcher(root):
     file = root / LAUNCHER
-    # A login shell, because Finder's Terminal session does not carry the PATH a
-    # profile adds, and the double-click would die on `command not found: nurb`.
-    file.write_text(
-        "#!/bin/zsh -l\n"
-        'cd "$(dirname "$0")"\n'
-        "exec nurb dev --open\n"
-    )
-    file.chmod(0o755)
+    if os.name == "nt":
+        # newline="" so Windows text mode does not turn the explicit \r\n into
+        # \r\r\n: the batch file's line endings have to be exactly CRLF.
+        file.write_text(
+            "@echo off\r\n"
+            'cd /d "%~dp0"\r\n'
+            "nurb dev --open\r\n",
+            encoding="utf-8",
+            newline="",
+        )
+    else:
+        # A login shell, because Finder's Terminal session does not carry the PATH a
+        # profile adds, and the double-click would die on `command not found: nurb`.
+        file.write_text(
+            "#!/bin/zsh -l\n"
+            'cd "$(dirname "$0")"\n'
+            "exec nurb dev --open\n",
+            encoding="utf-8",
+        )
+        file.chmod(0o755)
     return file
 
 
 def cmd_launcher(args):
     _write_launcher(project_root())
-    print(f"  {LAUNCHER}: double-click in Finder to serve this project")
+    target = "double-click in Explorer to serve this project" if os.name == "nt" else "double-click in Finder to serve this project"
+    print(f"  {LAUNCHER}: {target}")
 
 
 def main(argv=None):
