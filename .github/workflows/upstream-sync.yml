@@ -35,11 +35,35 @@ jobs:
             exit 0
           }
           $branch = "upstream-sync/$((git rev-parse --short upstream/main))"
+          $head_short = (git rev-parse --short HEAD)
           git switch -C $branch
           git merge --no-commit --no-ff upstream/main
           if ($LASTEXITCODE -ne 0) {
+            # Conflict path: instead of failing the schedule with a throw
+            # (which produces nothing actionable), open a tracking issue
+            # pointing at this very run + the conflict-classified paths
+            # from the upstream_sync tool, so a maintainer can pick it up.
             git merge --abort
-            throw 'Upstream merge has conflicts; leaving the PR for manual preparation.'
+            Write-Host "Upstream merge has conflicts; opening tracking issue."
+            $drift = (uv run --project . python tools/upstream_sync.py status 2>$null) `
+                     | Select-String -Pattern '^(SAFE|REVIEW|WINDOWS-SPECIFIC):' `
+                     | ForEach-Object { $_.ToString().Trim() }
+            $body = @"
+            Scheduled upstream sync detected an unrecoverable conflict.
+
+            - fork `@ $head_short` is `$behind` commits behind `upstream/main`
+            - run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            - next step: see `docs/windows/PORTING.md` for the merge protocol,
+              `docs/windows/UPSTREAM-SYNC.md` for the strict-gate semantics.
+
+            Current drift classification:
+
+            ```
+            $(($drift -join "`n"))
+            ```
+            "@
+            gh issue create --title "Upstream sync conflict ($head_short ← upstream/main, $behind commits)" --body $body --label "upstream-sync"
+            throw 'See the tracking issue opened above for the merge protocol.'
           }
           git commit -m 'Sync upstream nurb'
           git push --force-with-lease origin $branch

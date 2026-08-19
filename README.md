@@ -1,14 +1,10 @@
 <div align="center">
 
-# <code>nurb</code> for Windows
+# `nurb-windows port`
 
-```
- _   _ _   _ ____  ____
-| \ | | | | |  _ \| __ )
-|  \| | | | | |_) |  _ \
-| |\  | |_| |  _ <| |_) |
-|_| \_|\___/|_| \_\____/
-```
+<p align="center">
+  <img src="assets/logo.png" alt="nurb-windows port — agentic CAD for 3D printing, OCCT-backed, Windows 10/11 x64" width="780">
+</p>
 
 **Agentic CAD for 3D printing, rebuilt as a first-class Windows application.**
 Your agent writes parts as Python functions, nurb builds them into real solids,
