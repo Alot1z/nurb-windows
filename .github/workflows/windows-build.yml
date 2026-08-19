@@ -51,10 +51,16 @@ jobs:
       - name: Desktop Rust tests
         # npm test only runs the Node suite; the Rust crate's tests (48,
         # including the wheel-pick and extension-validation regressions) would
-        # otherwise never run in CI. The toolchain is already installed above
-        # and the debug profile is a fraction of the release build that follows.
-        working-directory: desktop/src-tauri
-        run: cargo test --lib
+        # otherwise never run in CI. Stage first: the crate's build script
+        # requires the uv sidecar in binaries/, which the release build's
+        # beforeBuildCommand would otherwise fetch. The toolchain is already
+        # installed above and the debug profile is a fraction of the release
+        # build that follows.
+        working-directory: desktop
+        run: |
+          npm run stage
+          cd src-tauri
+          cargo test --lib
       - name: Build Windows installer and updater artifacts
         working-directory: desktop
         run: npm run tauri -- build
