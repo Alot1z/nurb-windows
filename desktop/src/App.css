@@ -374,6 +374,14 @@ textarea {
   border-left-color: var(--accent);
 }
 
+/* Drifted off a variant: still where the work is, so the row stays lit, and the
+   accent name says these are its values plus some drag. */
+.part-var.modified {
+  color: var(--accent);
+  background: var(--active);
+  border-left-color: var(--accent);
+}
+
 .part-add {
   display: flex;
   align-items: center;
@@ -1638,6 +1646,49 @@ textarea {
 .settings-action.secondary:hover {
   background: var(--active);
   color: var(--text);
+}
+
+.about-card.api-key-dialog {
+  width: min(500px, calc(100vw - 80px));
+}
+
+.api-key-label {
+  display: block;
+  margin: 18px 0 6px;
+  color: var(--dim);
+  font: 11px var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.api-key-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  padding: 9px 10px;
+  font: 13px var(--mono);
+  outline: none;
+}
+
+.api-key-input:focus {
+  border-color: rgba(110, 231, 168, 0.55);
+}
+
+.api-key-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  margin-top: 8px;
+  color: var(--dimmer);
+  font: 11px var(--mono);
+}
+
+.api-key-meta .about-copy {
+  text-align: left;
 }
 
 .settings-toggle {
