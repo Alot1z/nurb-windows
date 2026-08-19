@@ -131,22 +131,7 @@ fn resources(app: &tauri::AppHandle) -> Result<Resources, String> {
     let adapter_package = dir.join("adapter-package.json");
     let adapter_lock = dir.join("adapter-package-lock.json");
     let adapter_lock_hash = file_hash(&adapter_lock, "adapter lock")?;
-    // Pick the newest bundled wheel, never the first the filesystem yields.
-    // An in-place upgrade leaves the previous release's wheel behind (NSIS
-    // does not clean resources on install-over), so without a deterministic
-    // choice a stale nurb-0.20.1 wheel could shadow nurb-0.21.0 and the app
-    // would keep its old engine forever while calling itself the new version.
-    let wheel = std::fs::read_dir(&dir)
-        .map_err(|e| format!("cannot read {}: {e}", dir.display()))?
-        .filter_map(|entry| entry.ok())
-        .map(|entry| entry.path())
-        .filter(|path| {
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.starts_with("nurb-") && name.ends_with(".whl"))
-        })
-        .max_by_key(|path| wheel_version_key(path))
-        .ok_or_else(|| format!("no nurb wheel bundled in {}", dir.display()))?;
+    let wheel = newest_wheel(&dir)?;
     let wheel_hash = file_hash(&wheel, "wheel")?;
     Ok(Resources {
         wheel,
@@ -383,6 +368,26 @@ fn wheel_version(name: &str) -> Option<&str> {
         .next()
 }
 
+/// The newest bundled wheel, never the first the filesystem yields. An
+/// in-place upgrade leaves the previous release's wheel behind (NSIS does not
+/// clean resources on install-over), so without a deterministic version-ordered
+/// choice a stale wheel could shadow the new one: the app would provision the
+/// old engine (or show the old version in the About box) while calling itself
+/// the new version.
+fn newest_wheel(dir: &std::path::Path) -> Result<PathBuf, String> {
+    std::fs::read_dir(dir)
+        .map_err(|e| format!("cannot read {}: {e}", dir.display()))?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("nurb-") && name.ends_with(".whl"))
+        })
+        .max_by_key(|path| wheel_version_key(path))
+        .ok_or_else(|| format!("no nurb wheel bundled in {}", dir.display()))
+}
+
 /// A sortable version key for a wheel path: numeric components, so 0.10.0
 /// sorts after 0.9.0 (lexicographic string order would get that wrong).
 fn wheel_version_key(path: &std::path::Path) -> Option<(u64, u64, u64)> {
@@ -424,12 +429,13 @@ pub fn about_info(app: tauri::AppHandle) -> Result<AboutInfo, String> {
         .resource_dir()
         .map_err(|e| format!("no resource dir: {e}"))?
         .join("resources");
-    let nurb_version = std::fs::read_dir(&dir)
-        .map_err(|e| format!("cannot read {}: {e}", dir.display()))?
-        .filter_map(|entry| entry.ok())
-        .filter_map(|entry| entry.file_name().to_str().map(str::to_string))
-        .find_map(|name| wheel_version(&name).map(str::to_string))
-        .ok_or_else(|| format!("no nurb wheel bundled in {}", dir.display()))?;
+    let wheel = newest_wheel(&dir)?;
+    let nurb_version = wheel
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(wheel_version)
+        .ok_or_else(|| format!("no nurb wheel bundled in {}", dir.display()))?
+        .to_string();
     let occt_version = std::fs::read_to_string(dir.join("requirements.lock"))
         .ok()
         .and_then(|lock| occt_version(&lock));
@@ -822,8 +828,9 @@ mod tests {
         // An upgrade leaves the old release's wheel in resources (NSIS does
         // not clean it), and read_dir order is not defined. The pick must be
         // deterministic and version-ordered, or a stale wheel shadows the new
-        // one and the app keeps its old engine. 0.10.0 vs 0.9.0 also guards
-        // against a lexicographic comparison, which would get that wrong.
+        // one and the app keeps its old engine (or the About box its old
+        // version). 0.10.0 vs 0.9.0 also guards against a lexicographic
+        // comparison, which would get that wrong.
         let dir = std::env::temp_dir().join(format!("nurb-wheel-pick-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         for name in [
@@ -832,21 +839,15 @@ mod tests {
         ] {
             std::fs::write(dir.join(name), b"wheel").unwrap();
         }
-        let picked = std::fs::read_dir(&dir)
-            .unwrap()
-            .filter_map(|entry| entry.ok())
-            .map(|entry| entry.path())
-            .filter(|path| {
-                path.file_name()
-                    .and_then(|name| name.to_str())
-                    .is_some_and(|name| name.starts_with("nurb-") && name.ends_with(".whl"))
-            })
-            .max_by_key(|path| wheel_version_key(path))
-            .unwrap();
+        let picked = super::newest_wheel(&dir).unwrap();
         assert_eq!(
             picked.file_name().unwrap().to_str().unwrap(),
             "nurb-0.10.0-py3-none-any.whl"
         );
+        // An empty dir is an error, not a silent fallback.
+        std::fs::remove_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(super::newest_wheel(&dir).is_err());
         std::fs::remove_dir_all(dir).unwrap();
     }
 
