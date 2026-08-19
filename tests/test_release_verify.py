@@ -252,3 +252,17 @@ def test_committed_pubkey_envelope_decodes(tmp_path):
     assert len(key_id) == 8
     assert alg in (b"Ed", b"ED")
     assert text.splitlines()[0].startswith("untrusted comment:")
+
+
+def test_spaced_and_unicode_paths_still_verify(tmp_path, keypair):
+    """A checkout under a path with spaces and non-ASCII characters must not
+    break the verifier: the tool passes paths as arguments (never through a
+    shell), and this guards that property against a future shell-string
+    regression. Real installs live under paths like this."""
+    seed, pub = keypair
+    spaced = tmp_path / "space agent test" / "N\u00fcrb \u6d4b\u8bd5"
+    spaced.mkdir(parents=True)
+    build_release(spaced, seed, pub)
+    proc = run_verify(spaced)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "VERIFIED" in proc.stdout
