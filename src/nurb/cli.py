@@ -882,8 +882,8 @@ def cmd_slice(args):
     if not wanted:
         sys.exit(
             "  no printer chosen, and a slice is meaningless without one.\n"
-            "  Name the machine once in printer.toml (`profile = \"bambu_a1_mini\"`),\n"
-            f"  in ~/.config/nurb/config.toml for every project, or pass --printer.\n"
+            "  Name the machine once in printer.toml (`profile = \"bambu_a1_mini\"`)\n"
+            "  or in the per-user config file the platform layer reports, or pass --printer.\n"
             f"  have: {', '.join(sorted(checks.profiles()))}"
         )
     vendors = slicing.vendors(exe)
