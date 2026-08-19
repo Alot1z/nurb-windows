@@ -102,3 +102,80 @@ jobs:
           name: release-provenance
           path: ${{ runner.temp }}/release-provenance.json
           if-no-files-found: error
+
+  # The release must prove itself before it is trusted: download the actual
+  # released installer (never the workspace copy), silent-install it into a
+  # scratch dir that deliberately contains a space, verify the version
+  # resource and the file layout, then launch the app and require the main
+  # process and its WebView2 child to stay alive. This is a smoke test only
+  # (install + version + launch + process-alive); the full updater E2E stays
+  # manual. A failure here fails the workflow, so a release whose installer
+  # cannot install or whose app cannot start never ships.
+  smoke:
+    needs: windows
+    runs-on: windows-latest
+    steps:
+      - name: Download the released installer
+        shell: pwsh
+        run: |
+          $tag = "${{ inputs.tag || github.ref_name }}"
+          $version = $tag.TrimStart('v')
+          $url = "https://github.com/${{ github.repository }}/releases/download/$tag/nurb_${version}_x64-setup.exe"
+          $dest = Join-Path $env:RUNNER_TEMP "nurb-smoke-setup.exe"
+          curl.exe -sL -o $dest $url
+          if (-not (Test-Path $dest)) { throw "installer download failed" }
+          Write-Host "downloaded $((Get-Item $dest).Length) bytes for $tag"
+
+      - name: Silent-install into a scratch dir with a space
+        shell: pwsh
+        run: |
+          $setup = Join-Path $env:RUNNER_TEMP "nurb-smoke-setup.exe"
+          $dir = Join-Path $env:RUNNER_TEMP "nurb smoke test"
+          # The whole command line goes in one pair of quotes: cmd strips the
+          # outer pair, NSIS requires /D= to be last and unquoted, and the
+          # setup path (runner temp) has no spaces. A path with a space is the
+          # point of this step, so /D= must stay bare.
+          cmd /c "$setup /S /D=$dir"
+          if ($LASTEXITCODE -ne 0) { throw "silent install failed with exit $LASTEXITCODE" }
+          if (-not (Test-Path (Join-Path $dir "nurb.exe"))) { throw "nurb.exe missing after install" }
+          Write-Host "installed to $dir"
+
+      - name: Verify the version resource and file layout
+        shell: pwsh
+        run: |
+          $tag = "${{ inputs.tag || github.ref_name }}"
+          $version = $tag.TrimStart('v')
+          $dir = Join-Path $env:RUNNER_TEMP "nurb smoke test"
+          $vi = (Get-Item (Join-Path $dir "nurb.exe")).VersionInfo
+          Write-Host "FileVersion: $($vi.FileVersion) (expected $version)"
+          if ($vi.FileVersion -ne $version) { throw "version mismatch: $($vi.FileVersion) != $version" }
+          foreach ($f in @("nurb.exe", "uninstall.exe", "uv.exe", "resources")) {
+            if (-not (Test-Path (Join-Path $dir $f))) { throw "missing $f in install" }
+          }
+          Write-Host "layout OK: nurb.exe, uninstall.exe, uv.exe, resources"
+
+      - name: Launch and confirm the app stays alive
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP "nurb smoke test"
+          Start-Process -FilePath (Join-Path $dir "nurb.exe")
+          $deadline = (Get-Date).AddSeconds(90)
+          $alive = $false
+          while ((Get-Date) -lt $deadline) {
+            $procs = Get-Process -Name nurb -ErrorAction SilentlyContinue
+            if ($procs -and $procs.Count -gt 0) { $alive = $true; break }
+            Start-Sleep -Seconds 5
+          }
+          if (-not $alive) { throw "nurb.exe never appeared or exited" }
+          $main = $procs[0]
+          Start-Sleep -Seconds 15
+          $main2 = Get-Process -Id $main.Id -ErrorAction SilentlyContinue
+          if (-not $main2) { throw "nurb.exe exited after appearing (pid $($main.Id))" }
+          $webview = Get-CimInstance Win32_Process | Where-Object {
+            $_.Name -eq "msedgewebview2.exe" -and $_.ParentProcessId -eq $main.Id
+          }
+          if (-not $webview) { throw "WebView2 child process missing for pid $($main.Id)" }
+          Write-Host "SMOKE OK: nurb.exe alive (pid $($main.Id)) with WebView2 child"
+          Get-Process -Name nurb, msedgewebview2 -ErrorAction SilentlyContinue |
+            Where-Object { $_.Id -eq $main.Id -or $_.Id -in $webview.ProcessId } |
+            Stop-Process -Force -ErrorAction SilentlyContinue
