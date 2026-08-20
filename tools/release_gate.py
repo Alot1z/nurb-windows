@@ -35,8 +35,8 @@ def check(name: str, ok: bool, detail: str = "") -> tuple[str, bool, str]:
 def check_clean_tree() -> tuple[str, bool, str]:
     """The working tree should be in a state that signals a release is
     ready to commit. The private developer scratch space is allowed
-    under either of its two valid root-level names — the policy
-    `.dev/` or the historical `./` — because both are gitignored
+    under either of its two valid root-level names - the policy
+    `.dev/` or the historical `./` - because both are gitignored
     and never staged. Everything else (modifications and new untracked
     files outside those two) means work-in-progress that should be
     committed first."""
@@ -72,7 +72,10 @@ def check_private_key_ignored() -> tuple[str, bool, str]:
     bad = [
         p
         for p in tracked
-        if p.endswith("tauri-updater.key") or p.endswith(".password")
+        if p.endswith("tauri-updater.key")
+        or p.endswith(".password")
+        or p.endswith(".pfx")
+        or p.endswith(".p12")
     ]
     if bad:
         return check("private-key-ignored", False, f"tracked: {bad}")
@@ -115,12 +118,13 @@ def check_upstream_pin() -> tuple[str, bool, str]:
     endpoints = (
         data.get("plugins", {}).get("updater", {}).get("endpoints", []) or []
     )
-    bad = [e for e in endpoints if "Shpigford/nurb" in e or "Shpigford\\nurb" in e]
-    if bad:
-        return check("updater-pin", False, f"upstream endpoint found: {bad}")
+    allowed = [e for e in endpoints if "Alot1z/nurb-windows" in e]
+    unexpected = [e for e in endpoints if e not in allowed]
+    if unexpected:
+        return check("updater-pin", False, f"unexpected endpoint(s): {unexpected}")
     if not endpoints:
         return check("updater-pin", False, "no updater endpoints set")
-    return check("updater-pin", True, f"{len(endpoints)} fork-only endpoint(s)")
+    return check("updater-pin", True, f"{len(allowed)} fork-only endpoint(s)")
 
 
 def check_pinned_pubkey_matches() -> tuple[str, bool, str]:

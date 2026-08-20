@@ -23,3 +23,5 @@ tests/_scratch_mcp/
 /.dev/
 /./
 tmp/
+*.pfx
+*.p12
