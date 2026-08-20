@@ -1,0 +1,7 @@
+#!/bin/bash
+# Prevent "Generated with " and "Co-Authored-By: " in commit messages
+if grep -q "Generated with \|Co-Authored-By: " "$1"; then
+    echo "ERROR: Commit message contains Generated/Co-Authored lines."
+    echo "These are not allowed. Please remove them and try again."
+    exit 1
+fi
