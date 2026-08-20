@@ -1,0 +1,26 @@
+#!/bin/bash
+# Commit-message guard. Rejects top-of-message attribution lines that the
+# public fork no longer carries. The term list lives OUT of the tree in a
+# gitignored file so no brand string is ever committed. If the list file is
+# not present, only the structural check below still applies.
+set -euo pipefail
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+TERMS="$HERE/ignored-terms.txt"
+
+if [ -f "$TERMS" ]; then
+    if grep -qEf "$TERMS" "$1"; then
+        echo "ERROR: Commit message matches a disallowed phrase (see .githooks/ignored-terms.txt)."
+        exit 1
+    fi
+fi
+
+# Structural guard: block the generic "Generated with <tool>"/"Co-Authored-By: <tool>"
+# top lines regardless of which tool name fills <tool>.
+if grep -q "Created with\|Generated with\|Co-authored-by:\|Co-Authored-By:" "$1"; then
+    if [ ! -f "$TERMS" ]; then
+        echo "ERROR: Commit message contains attribution lines not allowed on the public fork."
+        exit 1
+    fi
+fi
+exit 0
