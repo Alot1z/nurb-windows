@@ -30,3 +30,7 @@ dist-ssr
 # TAURI_SIGNING_PRIVATE_KEY / TAURI_SIGNING_PRIVATE_KEY_PASSWORD.
 signing/tauri-updater.key
 signing/*.password
+
+# Authenticode certificate bundles: private signing material, never tracked.
+*.pfx
+*.p12

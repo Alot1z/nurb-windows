@@ -92,7 +92,7 @@ def fetch_uv(target: str) -> Path:
 def signable_targets() -> list:
     """Locate Windows executables that, once produced, are candidates for
     Authenticode signing. A staged build that hasn't produced these files
-    is a no-op at the signing layer — their absence is not an error here,
+    is a no-op at the signing layer - their absence is not an error here,
     only the loud-fail decision lives in `check_authenticode_signing`."""
     out = []
     for candidate in (
@@ -142,7 +142,11 @@ def check_authenticode_signing(executables) -> int:
             'authenticode required but NURB_WINDOWS_AUTHENTICODE_PFX is unset'
         )
     if not Path(pfx).is_file():
-        raise RuntimeError(f'authenticode: PFX not found at {pfx}')
+        raise RuntimeError(
+            f'authenticode: PFX not found at {pfx}. ' 
+            'Set NURB_WINDOWS_AUTHENTICODE_PFX to an existing .pfx file, ' 
+            'or unset NURB_WINDOWS_AUTHENTICODE_REQUIRED to skip signing.'
+        )
     signtool_path = shutil.which('signtool') or shutil.which('signtool.exe')
     if signtool_path is None:
         raise RuntimeError(
