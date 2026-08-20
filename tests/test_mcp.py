@@ -12,7 +12,6 @@ import threading
 
 import pytest
 
-SCRATCH = pathlib.Path(__file__).parent / "_scratch_mcp"
 PART = '''from nurb import *
 
 
@@ -26,17 +25,12 @@ def widget(width=10.0, depth=20.0, height=5.0, draft=False):
 
 
 @pytest.fixture()
-def project():
-    parts = SCRATCH / "parts"
+def project(tmp_path):
+    parts = tmp_path / "parts"
     parts.mkdir(parents=True, exist_ok=True)
     (parts / "widget.py").write_text(PART, encoding="utf-8")
     (parts / "widget.md").write_text("# widget\n\nA card for the MCP test.\n", encoding="utf-8")
-    yield SCRATCH
-    import shutil
-
-    shutil.rmtree(SCRATCH, ignore_errors=True)
-
-
+    return tmp_path
 class Client:
     """A minimal MCP client over pipes: requests on stdin, responses on
     stdout, read by a background thread so the test can time out cleanly."""

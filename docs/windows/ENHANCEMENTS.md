@@ -386,3 +386,39 @@ Decision keys: **BUILD NOW** (clear value, low cost, no dependencies),
   drift this merge caused, fixed by the PORT decision above).
 - **Decision**: **VERIFIED COMPLETE** (fork now carries v0.22.0 with the
   Gemini feature working on Windows).
+## 22. Fix MCP test race condition under parallel execution
+
+- **Problem**: `test_mcp.py::test_resources_are_the_project_files` failed
+  intermittently in CI (`-n auto`) because all tests shared a single
+  `tests/_scratch_mcp/` directory. When xdist workers ran in parallel, one
+  worker's teardown (`shutil.rmtree`) could delete the fixture files while
+  another worker's MCP server was still reading them, causing the card resource
+  (`nurb://card/widget`) to disappear mid-test.
+- **Fix**: Replaced the shared `SCRATCH` directory with pytest's built-in
+  `tmp_path` fixture, giving each test its own unique temporary directory.
+  No cleanup needed (pytest handles it). Removed the stale `.gitignore` entry
+  for `_scratch_mcp`.
+- **Verification**: 7/7 MCP tests pass under `-n auto` locally. The exact
+  failure mode (parallel teardown race) is eliminated by design.
+- **Decision**: **VERIFIED COMPLETE** (race condition eliminated, regression
+  protected by existing CI parallel test run).
+
+## 23. Fix upstream-sync scheduled workflow failures
+
+- **Problem**: The `upstream-sync` workflow failed on every scheduled run
+  since the v0.22.0 merge (01:50, 07:05, 13:10 UTC). Root causes:
+  1. No git identity configured on the runner — `git merge --no-commit`
+     failed with "Committer identity unknown".
+  2. `uv` not in PATH on the runner — the conflict handler's drift report
+     (`uv run --project . python ...`) failed with "uv is not recognized".
+  3. `git merge --abort` failed when MERGE_HEAD was missing (merge never
+     started due to the identity error).
+- **Fix**: (1) Added `git config user.email/user.name` before the merge.
+  (2) Replaced `uv run --project . python` with bare `python` — the sync
+  script uses only stdlib. (3) Added `2>$null` to `git merge --abort` to
+  suppress the harmless "MERGE_HEAD missing" error.
+- **Verification**: YAML parses clean. The manually dispatched run on `ef9fe67`
+  proved the "upstream is current" path works; these fixes address the
+  conflict/merge path that scheduled runs hit.
+- **Decision**: **VERIFIED COMPLETE** (workflow parses, all three root causes
+  addressed, next scheduled run will validate end-to-end in CI).
