@@ -1,4 +1,4 @@
-﻿name: upstream-sync
+name: upstream-sync
 
 on:
   schedule:
@@ -39,6 +39,8 @@ jobs:
           $branch = "upstream-sync/$((git rev-parse --short upstream/main))"
           $head_short = (git rev-parse --short HEAD)
           $up_short = (git rev-parse --short upstream/main)
+          git config user.email "nurb-ci@users.noreply.github.com"
+          git config user.name "nurb-ci"
           git switch -C $branch
           git merge --no-commit --no-ff upstream/main
           if ($LASTEXITCODE -ne 0) {
@@ -46,9 +48,9 @@ jobs:
             # enabled; otherwise fall back to a persistent conflict-tracker PR
             # carrying UPSTREAM-CONFLICT.md. The run still fails loudly so the
             # scheduled check stays meaningful, and the tracker points here.
-            git merge --abort
+            git merge --abort 2>$null
             Write-Host "Upstream merge has conflicts; opening tracking issue."
-            $drift = (uv run --project . python tools/upstream_sync.py status 2>$null) `
+            $drift = (python tools/upstream_sync.py status 2>$null) `
                      | Select-String -Pattern '^(SAFE|REVIEW|WINDOWS-SPECIFIC):' `
                      | ForEach-Object { $_.ToString().Trim() }
             $title = "Upstream sync conflict ($head_short <-- upstream/main, $behind commits)"
