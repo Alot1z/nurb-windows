@@ -89,7 +89,13 @@ def test_initialize_and_tools(project):
 
         tools = client.request("tools/list")
         names = [t["name"] for t in tools["result"]["tools"]]
-        for expected in ["nurb_build", "nurb_check", "nurb_inspect", "nurb_verify", "nurb_export", "nurb_rules", "nurb_api"]:
+        for expected in [
+            "nurb_build", "nurb_check", "nurb_inspect", "nurb_verify",
+            "nurb_export", "nurb_rules", "nurb_api",
+            "nurb_new", "nurb_diff", "nurb_card", "nurb_extract",
+            "nurb_stress", "nurb_scan", "nurb_compare",
+            "nurb_slice", "nurb_render", "nurb_skill", "nurb_update",
+        ]:
             assert expected in names
     finally:
         client.close()
@@ -183,5 +189,61 @@ def test_resource_read_rejects_unknown_uris(project):
         assert reply["error"]["code"] == -32002
         reply = client.request("resources/read", {"uri": "file:///etc/passwd"})
         assert reply["error"]["code"] == -32002
+    finally:
+        client.close()
+
+
+def test_new_tool_creates_part(project):
+    client = Client(project)
+    try:
+        client.notify("notifications/initialized")
+        result = client.request("tools/call", {"name": "nurb_new", "arguments": {"name": "bracket"}})
+        text = result["result"]["content"][0]["text"]
+        assert "bracket.py" in text
+        assert (project / "parts" / "bracket.py").is_file()
+    finally:
+        client.close()
+
+
+def test_card_tool_regenerates(project):
+    client = Client(project)
+    try:
+        client.notify("notifications/initialized")
+        result = client.request("tools/call", {"name": "nurb_card", "arguments": {"part": "widget"}})
+        text = result["result"]["content"][0]["text"]
+        assert "widget" in text
+    finally:
+        client.close()
+
+
+def test_diff_tool_compares(project):
+    client = Client(project)
+    try:
+        client.notify("notifications/initialized")
+        result = client.request("tools/call", {"name": "nurb_diff", "arguments": {"part": "widget"}})
+        text = result["result"]["content"][0]["text"]
+        assert "widget" in text
+    finally:
+        client.close()
+
+
+def test_extract_tool_finds_duplication(project):
+    client = Client(project)
+    try:
+        client.notify("notifications/initialized")
+        result = client.request("tools/call", {"name": "nurb_extract", "arguments": {}})
+        text = result["result"]["content"][0]["text"]
+        assert isinstance(text, str)
+    finally:
+        client.close()
+
+
+def test_skill_tool_prints(project):
+    client = Client(project)
+    try:
+        client.notify("notifications/initialized")
+        result = client.request("tools/call", {"name": "nurb_skill", "arguments": {}})
+        text = result["result"]["content"][0]["text"]
+        assert len(text) > 100
     finally:
         client.close()
