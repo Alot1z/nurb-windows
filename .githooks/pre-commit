@@ -27,7 +27,7 @@ fi
 # 2. Refuse any staged content that mentions the banned phrases.
 matches=""
 matches="$(git diff --cached -- ':(exclude).githooks/' \
-    | grep -iE '|' || true)"
+    | grep -iE 'freebuff|codebuff' || true)"
 if [ -n "$matches" ]; then
     {
         echo "pre-commit guard: forbidden phrase found in staged diff:"
