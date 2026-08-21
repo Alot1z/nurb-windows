@@ -22,6 +22,10 @@ tests/_scratch_mcp/
 
 /.dev/
 /./
+
+# Per-project plugin enable/disable state written by `nurb plugin` and the
+# desktop Settings panel; machine state, not source.
+/.nurb/
 tmp/
 *.pfx
 *.p12

@@ -2,6 +2,7 @@ mod acp;
 mod agents;
 mod env;
 mod extensions;
+mod plugins;
 mod prefs;
 mod process;
 mod provision;
@@ -361,7 +362,7 @@ fn part_views(project: &std::path::Path, body: &str) -> Result<serde_json::Value
 
 /// A minimal loopback GET. The nurb server always answers with Content-Length
 /// and Connection: close, so read-to-end is the whole protocol.
-fn http_get(port: u16, path: &str) -> Result<String, String> {
+pub(crate) fn http_get(port: u16, path: &str) -> Result<String, String> {
     let address = std::net::SocketAddr::from(([127, 0, 0, 1], port));
     let mut stream = TcpStream::connect_timeout(&address, Duration::from_secs(5))
         .map_err(|e| format!("connect to nurb dev: {e}"))?;
@@ -525,6 +526,8 @@ pub fn run() {
             terminal::extension_statuses,
             terminal::set_extension_enabled,
             terminal::install_extension,
+            plugins::plugin_statuses,
+            plugins::set_plugin_enabled,
             terminal::open_terminal_extension,
             terminal::launch_external_extension,
             terminal::terminal_input,

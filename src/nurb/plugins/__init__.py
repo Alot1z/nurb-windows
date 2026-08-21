@@ -16,14 +16,21 @@ A broken plugin never prevents other plugins from loading or nurb from starting.
 
 from .manifest import ManifestError, PluginManifest, parse_manifest
 from .registry import PluginState, registry
-from .loader import load_all, load_plugin
+from .loader import load_all, load_plugin, status_payload
+from .state import disabled_ids, set_enabled
+from .scaffold import ScaffoldError, scaffold_plugin
 
 __all__ = [
     "ManifestError",
     "PluginManifest",
     "PluginState",
+    "ScaffoldError",
+    "disabled_ids",
     "load_all",
     "load_plugin",
     "parse_manifest",
     "registry",
+    "scaffold_plugin",
+    "set_enabled",
+    "status_payload",
 ]

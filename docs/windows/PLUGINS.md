@@ -148,13 +148,45 @@ maps for commands and MCP tools. Look up commands with
 
 `nurb plugins` lists every loaded plugin, its version, state, and what it
 contributes. Errored plugins are listed with their error, so a broken plugin is
-visible rather than silently absent.
+visible rather than silently absent. `nurb plugins --json` emits the same view
+as machine-readable JSON (one entry per plugin with id, name, version,
+description, state, source, enabled, and its commands, mcp tools, and checks),
+which is what the desktop Settings panel renders.
+
+## Scaffolding a plugin
+
+`nurb plugin new <id>` copies the shipped template (`plugins/_template/`) into
+`<project>/plugins/<id>` and substitutes the id, the human name, and the sample
+tool name so the result is a working plugin: it parses, imports, registers, and
+appears in `nurb plugins`. The id must be lowercase alphanumeric with hyphens
+(`my-plugin`); an existing destination is refused without touching it.
+
+The template is never loaded itself: directories starting with `_` are skipped
+by discovery, so the template can live in a shipped tree.
+
+## Enabling and disabling
+
+Plugins load by default. A project can switch one off without deleting it:
+
+- `nurb plugin disable <id>` / `nurb plugin enable <id>`
+
+The decision is persisted in `<project>/.nurb/plugins.toml` as a single table:
+
+    [plugins]
+    disabled = ["everything"]
+
+Both the CLI and the desktop Settings panel write this file, so the two
+surfaces agree. A disabled plugin is still validated and recorded (it shows as
+`[disabled]` in `nurb plugins`, and the Settings toggle can switch it back on)
+but it is never imported, so it cannot register commands, MCP tools, or build
+checks. The change takes effect on the next load: immediately for the CLI,
+on the next `/api/plugins` request or server restart for a running dev server.
 
 ## PATH detection
 
 Example plugins that wrap an external executable discover it through
 `shutil.which()`, never a hard-coded path. On Windows this resolves
-`.exe`, `es.exe`, and so on through `PATHEXT`. A plugin that cannot
+`es.exe`, `universal`, and so on through `PATHEXT`. A plugin that cannot
 find its executable reports guidance (how to install it) instead of crashing,
 and its MCP tool returns an `isError: true` result.
 

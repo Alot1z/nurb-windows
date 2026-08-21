@@ -4,11 +4,12 @@ wiring, build checks, PATH detection, and failure isolation.
 Every test is deterministic: plugins are built in tmp dirs with fake
 executables where an executable is involved, never the developer's machine.
 The shipped examples are loaded and asserted on, but never required to have
-their tools installed (/es/universal are not assumed present).
+their tools installed (es/universal are not assumed present).
 """
 
 import argparse
 import importlib.util
+import json
 import os
 import pathlib
 import sys
@@ -18,10 +19,15 @@ import pytest
 from nurb.plugins import (
     ManifestError,
     PluginState,
+    ScaffoldError,
+    disabled_ids,
     load_all,
     load_plugin,
     parse_manifest,
     registry,
+    scaffold_plugin,
+    set_enabled,
+    status_payload,
 )
 from nurb.plugins.manifest import PluginManifest
 
@@ -385,15 +391,15 @@ def register(registry, manifest):
 # --- PATH detection (deterministic, no real executables needed) ---------------
 
 
-def test__plugin_finds_fake_executable_on_path(tmp_path):
-    """The  example's PATH detection works with a fake executable."""
+def test_everything_plugin_finds_fake_executable_on_path(tmp_path):
+    """The everything example's PATH detection works with a fake es.exe."""
     bindir = tmp_path / "bin"
     bindir.mkdir()
-    fake = bindir / (".exe" if sys.platform == "win32" else "")
-    fake.write_text("#!/bin/sh\necho  fake\n", encoding="utf-8")
+    fake = bindir / ("es.exe" if sys.platform == "win32" else "es")
+    fake.write_text("#!/bin/sh\necho es fake\n", encoding="utf-8")
 
     spec = importlib.util.spec_from_file_location(
-        "_example", "plugins/examples//plugin.py"
+        "everything_example", "plugins/examples/everything/plugin.py"
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -401,9 +407,9 @@ def test__plugin_finds_fake_executable_on_path(tmp_path):
     old_path = os.environ.get("PATH")
     os.environ["PATH"] = str(bindir) + (os.pathsep + old_path if old_path else "")
     try:
-        found = module._find_()
+        found = module._find_es()
         assert found is not None
-        assert "" in found.lower()
+        assert "es" in found.lower()
     finally:
         if old_path is None:
             os.environ.pop("PATH", None)
@@ -411,21 +417,21 @@ def test__plugin_finds_fake_executable_on_path(tmp_path):
             os.environ["PATH"] = old_path
 
 
-def test__plugin_reports_missing_without_crash(tmp_path, capsys):
-    """No  on PATH: the command prints guidance and exits 0."""
+def test_everything_plugin_reports_missing_without_crash(tmp_path, capsys):
+    """No es.exe on PATH: the command prints guidance and does not crash."""
     spec = importlib.util.spec_from_file_location(
-        "_example2", "plugins/examples//plugin.py"
+        "everything_example2", "plugins/examples/everything/plugin.py"
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
 
-    # PATH pointing at an empty dir:  is definitely absent.
+    # PATH pointing at an empty dir: es.exe is definitely absent.
     empty = tmp_path / "empty"
     empty.mkdir()
     old_path = os.environ.get("PATH")
     os.environ["PATH"] = str(empty)
     try:
-        module.cmd__status(argparse.Namespace(project=str(tmp_path), argv=[]))
+        module.cmd_everything_search(argparse.Namespace(project=str(tmp_path), argv=[]))
     finally:
         if old_path is None:
             os.environ.pop("PATH", None)
@@ -439,35 +445,35 @@ def test__plugin_reports_missing_without_crash(tmp_path, capsys):
 
 
 def test_shipped_examples_load():
-    """The three example plugins load from the repo's plugins/ dir."""
+    """The example plugins load from the repo's plugins/ dir."""
     root = pathlib.Path(__file__).resolve().parents[1]
     n = load_all(root)
     ids = {r.plugin_id for r in registry.loaded_plugins()}
-    assert {"", "everything", "agent-yoke"} <= ids
-    assert n >= 3
+    assert {"everything", "agent-yoke"} <= ids
+    assert n >= 2
 
 
 def test_shipped_examples_do_not_require_installed_tools():
-    """The examples load without their executables installed (, es,
-    universal are not assumed present on the developer's machine)."""
+    """The examples load without their executables installed (es, universal
+    are not assumed present on the developer's machine)."""
     root = pathlib.Path(__file__).resolve().parents[1]
     load_all(root)
-    for plugin_id in ("", "everything", "agent-yoke"):
+    for plugin_id in ("everything", "agent-yoke"):
         record = registry.get(plugin_id)
         assert record is not None
         assert record.state == PluginState.LOADED
 
 
-def test__example_manifest_contract():
-    """The public  extension manifest declares the expected contract."""
+def test_everything_example_manifest_contract():
+    """The everything example manifest declares the expected contract."""
     root = pathlib.Path(__file__).resolve().parents[1]
-    manifest = parse_manifest(root / "plugins/examples//plugin.toml")
-    assert manifest.id == ""
+    manifest = parse_manifest(root / "plugins/examples/everything/plugin.toml")
+    assert manifest.id == "everything"
     assert manifest.commands is True
     assert manifest.mcp_tools is True
     assert manifest.build_checks is False
     names = {d.name for d in manifest.mcp_tool_decls}
-    assert "_status" in names
+    assert "everything_search" in names
 
 
 def test_template_manifest_parses():
@@ -488,7 +494,7 @@ def test_mcp_server_lists_and_calls_plugin_tools(tmp_path):
     resp = mcp._handle({"method": "tools/list"}, tmp_path)
     names = {t["name"] for t in resp["tools"]}
     assert "nurb_build" in names  # builtins still there
-    assert "_status" in names  # shipped examples load via load_all
+    assert "everything_search" in names  # shipped examples load via load_all
 
 
 def test_mcp_plugin_tool_call_dispatches(tmp_path):
@@ -496,10 +502,10 @@ def test_mcp_plugin_tool_call_dispatches(tmp_path):
 
     load_all(tmp_path)
     resp = mcp._handle(
-        {"method": "tools/call", "params": {"name": "_status", "arguments": {}}},
+        {"method": "tools/call", "params": {"name": "everything_search", "arguments": {"query": "x"}}},
         tmp_path,
     )
-    #  may or may not be installed; either way it is a structured
+    # es.exe may or may not be installed; either way it is a structured
     # result, never an error response.
     assert "error" not in resp
     assert resp.get("content")
@@ -744,3 +750,157 @@ def register(registry, manifest):
     load_all(tmp_path)
     assert len(registry.get("good-plugin").build_check_fns) == 1
     assert len(registry.build_check_functions()) == 1
+
+
+# --- scaffolding (`nurb plugin new`) -----------------------------------------
+
+
+def test_scaffold_creates_a_working_plugin(tmp_path):
+    """plugin new writes the template with the id substituted, and it loads."""
+    dest = scaffold_plugin(tmp_path, "my-gadget")
+    assert dest == tmp_path / "plugins" / "my-gadget"
+    for file_name in ("plugin.toml", "plugin.py", "README.md"):
+        assert (dest / file_name).is_file()
+    manifest = parse_manifest(dest / "plugin.toml")
+    assert manifest.id == "my-gadget"
+    assert manifest.name == "My Gadget"
+    assert load_plugin(dest)  # parses, imports, registers
+    assert registry.has_command("my-gadget-hello")
+    assert registry.has_mcp_tool("my_gadget_tool")
+
+
+def test_scaffold_rejects_bad_ids_and_existing_dest(tmp_path):
+    for bad in ("My Gadget", "my_gadget", "-lead", "trail-", "a b"):
+        with pytest.raises(ScaffoldError):
+            scaffold_plugin(tmp_path, bad)
+    # Failure writes nothing: no plugins/ dir at all.
+    assert not (tmp_path / "plugins").exists()
+
+    dest = scaffold_plugin(tmp_path, "first-plugin")
+    with pytest.raises(ScaffoldError):
+        scaffold_plugin(tmp_path, "first-plugin")
+    assert (dest / "plugin.toml").is_file()  # untouched
+
+
+def test_scaffolded_plugin_module_is_valid_python(tmp_path):
+    """Hyphens in the id must not leak into Python identifiers."""
+    dest = scaffold_plugin(tmp_path, "my-gadget")
+    spec = importlib.util.spec_from_file_location("scaffolded_check", dest / "plugin.py")
+    module = importlib.util.module_from_spec(spec)
+    module.__spec__.loader.exec_module(module)  # must not raise SyntaxError
+
+
+# --- enable/disable state ----------------------------------------------------
+
+
+def test_disable_records_state_and_prevents_loading(tmp_path):
+    """A disabled plugin is recorded but never imported or registered."""
+    plugin_py = """
+def cmd_x(args):
+    print("x")
+
+def register(registry, manifest):
+    registry.add_command("disable-me-cmd", cmd_x, manifest.id)
+    registry.add_mcp_tool("disable_me_tool", {"name": "disable_me_tool"}, manifest.id)
+"""
+    write_plugin(tmp_path, name="disable-me", plugin_id="disable-me", plugin_py=plugin_py)
+    assert load_all(tmp_path) >= 1
+    assert registry.get("disable-me").state == PluginState.LOADED
+    assert registry.has_command("disable-me-cmd")
+
+    set_enabled(tmp_path, "disable-me", False)
+    assert disabled_ids(tmp_path) == {"disable-me"}
+    registry.clear()
+    load_all(tmp_path)
+    record = registry.get("disable-me")
+    assert record.state == PluginState.DISABLED
+    assert not registry.has_command("disable-me-cmd")
+    assert not registry.has_mcp_tool("disable_me_tool")
+    assert registry.command_handler("disable-me-cmd") == (None, None)
+
+    # Re-enabling restores the plugin and its contributions.
+    set_enabled(tmp_path, "disable-me", True)
+    registry.clear()
+    load_all(tmp_path)
+    assert registry.get("disable-me").state == PluginState.LOADED
+    assert registry.has_command("disable-me-cmd")
+
+
+def test_set_enabled_round_trips_through_the_state_file(tmp_path):
+    assert disabled_ids(tmp_path) == set()
+    state = set_enabled(tmp_path, "everything", False)
+    assert state == tmp_path / ".nurb" / "plugins.toml"
+    assert disabled_ids(tmp_path) == {"everything"}
+    set_enabled(tmp_path, "other", False)
+    assert disabled_ids(tmp_path) == {"everything", "other"}
+    set_enabled(tmp_path, "everything", True)
+    assert disabled_ids(tmp_path) == {"other"}
+    # A malformed state file reads as nothing disabled, never a crash.
+    (tmp_path / ".nurb").mkdir(exist_ok=True)
+    (tmp_path / ".nurb" / "plugins.toml").write_text("not [valid toml", encoding="utf-8")
+    assert disabled_ids(tmp_path) == set()
+
+
+def test_plugin_enable_disable_commands(tmp_path, monkeypatch, capsys):
+    """`nurb plugin disable|enable <id>` flip the persisted state."""
+    from nurb import cli
+
+    plugin_py = """
+def hello(args):
+    print("hello")
+
+def register(registry, manifest):
+    registry.add_command("cli-plugin-hello", hello, manifest.id)
+"""
+    write_plugin(tmp_path, name="cli-plugin", plugin_id="cli-plugin", plugin_py=plugin_py)
+    monkeypatch.setattr(cli, "project_root", lambda: tmp_path)
+
+    cli.main(["plugin", "disable", "cli-plugin"])
+    assert "disabled" in capsys.readouterr().out
+    assert registry.get("cli-plugin").state == PluginState.DISABLED
+    assert not registry.has_command("cli-plugin-hello")
+
+    cli.main(["plugin", "enable", "cli-plugin"])
+    assert "enabled" in capsys.readouterr().out
+    assert registry.get("cli-plugin").state == PluginState.LOADED
+    assert registry.has_command("cli-plugin-hello")
+
+    # Unknown ids are refused and nothing is written for them.
+    with pytest.raises(SystemExit):
+        cli.main(["plugin", "disable", "nope"])
+    assert "unknown plugin" in capsys.readouterr().out
+    state_text = (tmp_path / ".nurb" / "plugins.toml").read_text(encoding="utf-8")
+    assert "nope" not in state_text
+
+
+# --- status payload and JSON -------------------------------------------------
+
+
+def test_status_payload_shape(tmp_path):
+    write_plugin(tmp_path, name="payload-plugin", plugin_id="payload-plugin")
+    set_enabled(tmp_path, "payload-plugin", False)
+    payload = status_payload(tmp_path)
+    entry = next(p for p in payload if p["id"] == "payload-plugin")
+    assert entry["state"] == "disabled"
+    assert entry["enabled"] is False
+    for key in (
+        "id", "name", "version", "description", "state", "error", "source",
+        "enabled", "commands", "mcpTools", "checks",
+    ):
+        assert key in entry
+
+
+def test_plugins_command_emits_json(capsys):
+    """`nurb plugins --json` prints the registry as parseable JSON."""
+    from nurb import cli
+
+    cli.main(["plugins", "--json"])
+    data = json.loads(capsys.readouterr().out)
+    assert "plugins" in data
+    assert isinstance(data["plugins"], list)
+    assert data["plugins"]  # the shipped examples are present
+    for key in (
+        "id", "name", "version", "description", "state", "error", "source",
+        "enabled", "commands", "mcpTools", "checks",
+    ):
+        assert key in data["plugins"][0]

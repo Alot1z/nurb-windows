@@ -9,6 +9,7 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import About from "./About";
 import AgentsHelp from "./AgentsHelp";
 import ExtensionsModal, { type ExtensionStatus } from "./ExtensionsModal";
+import type { PluginStatus } from "./plugins";
 import TerminalPanel from "./TerminalPanel";
 import Chat, { AGENT_LABEL, PROJECT_CHAT } from "./Chat";
 import GeminiKeyDialog from "./GeminiKeyDialog";
@@ -255,6 +256,10 @@ function App() {
   // host (CLI in a terminal) or launch (external app). Off by
   // default and absent from the normal feature set.
   const [extStatuses, setExtStatuses] = useState<ExtensionStatus[]>([]);
+  // The engine's plugin registry for the active project, for the Settings
+  // panel's Plugins section. Distinct from extensions: plugins extend the
+  // engine (CLI/MCP/checks); extensions are CLIs the app hosts in a terminal.
+  const [pluginStatuses, setPluginStatuses] = useState<PluginStatus[]>([]);
   const [showExtensions, setShowExtensions] = useState(false);
   const [terminalExt, setTerminalExt] = useState<ExtensionStatus | null>(null);
   const [showGeminiKey, setShowGeminiKey] = useState(false);
@@ -520,12 +525,25 @@ function App() {
   // The parent page cannot join the viewer's websocket (the server only admits
   // its own origin), so the parts list refreshes on a light poll instead.
   const activeServer = active ? servers[active] : undefined;
+  // Plugins change rarely (a toggle, a scaffold), so they refresh on project
+  // switch and after a Settings toggle, not on a poll.
+  const refreshPlugins = useCallback(() => {
+    if (!active) {
+      setPluginStatuses([]);
+      return;
+    }
+    invoke<PluginStatus[]>("plugin_statuses", { path: active })
+      .then((list) => setPluginStatuses(Array.isArray(list) ? list : []))
+      .catch(() => setPluginStatuses([]));
+  }, [active]);
   useEffect(() => {
     if (!active || !activeServer) {
       setPartState(null);
+      setPluginStatuses([]);
       return;
     }
     setPartState(null);
+    refreshPlugins();
     let stale = false;
     const fetchParts = async () => {
       try {
@@ -547,7 +565,7 @@ function App() {
       stale = true;
       clearInterval(timer);
     };
-  }, [active, activeServer]);
+  }, [active, activeServer, refreshPlugins]);
 
   const parts = partState?.path === active ? partState.parts : NO_PARTS;
   const placedIn = useMemo(() => placedInMap(parts), [parts]);
@@ -1318,6 +1336,9 @@ function App() {
           onReset={() => changeProjectsFolder(null)}
           extensions={extStatuses}
           onExtensionsChanged={refreshExtensions}
+          plugins={pluginStatuses}
+          onPluginsChanged={refreshPlugins}
+          projectPath={active ?? ""}
           onClose={() => setShowSettings(false)}
         />
       )}

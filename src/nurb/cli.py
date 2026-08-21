@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import errno
 import importlib.metadata
+import json
 import os
 import pathlib
 import sys
@@ -572,32 +573,74 @@ def cmd_api(args):
 
 def cmd_plugins(args):
     """List loaded plugins and what each contributes."""
-    from .plugins import load_all, registry
+    from .plugins import registry, status_payload
 
-    load_all(project_root())
-    records = registry.all_plugins()
-    if not records:
+    payload = status_payload(project_root())
+    if getattr(args, "json", False):
+        print(json.dumps({"plugins": payload}, indent=2))
+        return
+    if not payload:
         print("  no plugins loaded")
         return
-    for record in records:
-        bits = [f"{record.plugin_id} {record.version}"]
-        if record.state.value == "error":
-            bits.append(f"[error: {record.error}]")
-        elif record.state.value == "loaded":
+    for entry in payload:
+        bits = [f"{entry['id']} {entry['version']}"]
+        if entry["state"] == "error":
+            bits.append(f"[error: {entry['error']}]")
+        elif entry["state"] == "loaded":
             caps = []
-            if record.commands:
-                caps.append(f"{len(record.commands)} command(s)")
-            if record.mcp_tools:
-                caps.append(f"{len(record.mcp_tools)} mcp tool(s)")
-            if record.build_check_fns:
-                caps.append(f"{len(record.build_check_fns)} check(s)")
+            if entry["commands"]:
+                caps.append(f"{len(entry['commands'])} command(s)")
+            if entry["mcpTools"]:
+                caps.append(f"{len(entry['mcpTools'])} mcp tool(s)")
+            if entry["checks"]:
+                caps.append(f"{entry['checks']} check(s)")
             bits.append("[" + ", ".join(caps) + "]" if caps else "[no capabilities]")
         else:
-            bits.append(f"[{record.state.value}]")
+            bits.append(f"[{entry['state']}]")
         print("  " + " ".join(bits))
-    errored = registry.errored_plugins()
+    errored = [e for e in payload if e["state"] == "error"]
     if errored:
         print(f"  {len(errored)} plugin(s) failed to load and were skipped")
+
+
+def cmd_plugin_new(args):
+    """Scaffold a new plugin from the shipped template."""
+    from .plugins import ScaffoldError, scaffold_plugin
+
+    try:
+        dest = scaffold_plugin(project_root(), args.name)
+    except ScaffoldError as exc:
+        print(f"  {exc}")
+        sys.exit(1)
+    print(f"  created {dest}")
+    print(f"  edit {dest / 'plugin.toml'} (id, name, description), then implement {dest / 'plugin.py'}")
+    print("  the plugin loads next time nurb starts; `nurb plugins` shows it")
+
+
+def _cmd_plugin_set(args, enabled: bool):
+    """Enable or disable a plugin for this project."""
+    from .plugins import load_all, registry, set_enabled
+
+    root = project_root()
+    load_all(root)
+    record = registry.get(args.id)
+    if not record:
+        print(f"  unknown plugin {args.id!r}; nothing was changed")
+        print("  `nurb plugins` lists the ids nurb knows about")
+        sys.exit(1)
+    set_enabled(root, args.id, enabled)
+    load_all(root)  # re-read so the registry reflects the change immediately
+    current = registry.get(args.id)
+    state = current.state.value if current else "unknown"
+    print(f"  {args.id} {'enabled' if enabled else 'disabled'} (state: {state})")
+
+
+def cmd_plugin_enable(args):
+    _cmd_plugin_set(args, True)
+
+
+def cmd_plugin_disable(args):
+    _cmd_plugin_set(args, False)
 
 
 # The subcommands nurb itself declares. A plugin command with one of these
@@ -605,7 +648,7 @@ def cmd_plugins(args):
 # real command, so the dispatch in main() refuses them.
 BUILTIN_COMMANDS = frozenset({
     "new", "dev", "launcher", "build", "check", "rules", "api", "plugins",
-    "inspect", "scan", "compare", "skill", "update", "verify", "extract",
+    "plugin", "inspect", "scan", "compare", "skill", "update", "verify", "extract",
     "card", "diff", "slice", "stress", "render", "export",
 })
 
@@ -1353,7 +1396,20 @@ def main(argv=None):
     s.set_defaults(fn=cmd_api)
 
     s = sub.add_parser("plugins", help="list loaded plugins and what each contributes")
+    s.add_argument("--json", action="store_true", help="emit the registry as JSON (machine-readable)")
     s.set_defaults(fn=cmd_plugins)
+
+    s = sub.add_parser("plugin", help="manage plugins: scaffold, enable, disable")
+    plugin_sub = s.add_subparsers(dest="plugin_cmd", required=True)
+    ps = plugin_sub.add_parser("new", help="scaffold a new plugin from the shipped template")
+    ps.add_argument("name", help="plugin id: lowercase alphanumeric with hyphens (my-plugin)")
+    ps.set_defaults(fn=cmd_plugin_new)
+    ps = plugin_sub.add_parser("enable", help="enable a plugin for this project")
+    ps.add_argument("id")
+    ps.set_defaults(fn=cmd_plugin_enable)
+    ps = plugin_sub.add_parser("disable", help="disable a plugin for this project")
+    ps.add_argument("id")
+    ps.set_defaults(fn=cmd_plugin_disable)
 
     s = sub.add_parser("inspect", help="measure a built part: faces, normals, concave edges")
     s.add_argument("part", nargs="?")

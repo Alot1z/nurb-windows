@@ -17,6 +17,7 @@ from pathlib import Path
 
 from .manifest import ManifestError, parse_manifest
 from .registry import PluginState, registry
+from .state import disabled_ids
 
 log = logging.getLogger(__name__)
 
@@ -127,8 +128,14 @@ def _nurb_version() -> str | None:
         return None
 
 
-def load_plugin(plugin_dir: Path) -> bool:
-    """Load a single plugin from a directory. Returns True on success."""
+def load_plugin(plugin_dir: Path, disabled: set[str] | None = None) -> bool:
+    """Load a single plugin from a directory. Returns True on success.
+
+    ``disabled`` is the set of plugin ids this project has switched off. A
+    disabled plugin is recorded (so the registry and `nurb plugins` still show
+    it, and the Settings panel can switch it back on) but never imported or
+    registered: a disabled plugin cannot add commands, tools, or checks.
+    """
     manifest_path = plugin_dir / "plugin.toml"
     try:
         manifest = parse_manifest(manifest_path)
@@ -140,6 +147,23 @@ def load_plugin(plugin_dir: Path) -> bool:
         log.warning("skipping plugin in %s: %s", plugin_dir, exc)
         registry.mark_error(f"{plugin_dir.name}:{manifest_path.name}", str(exc))
         return False
+
+    # A disabled plugin is still validated (a broken manifest shows as error,
+    # not as disabled) but never imported. Record it so the toggle surface
+    # sees it; a second pass over the same disabled plugin is a no-op.
+    if disabled and manifest.id in disabled:
+        existing = registry.get(manifest.id)
+        if existing and existing.source == str(plugin_dir) and existing.state == PluginState.DISABLED:
+            return True
+        record = registry.register(
+            plugin_id=manifest.id,
+            name=manifest.name,
+            version=manifest.version,
+            source=str(plugin_dir),
+            state=PluginState.DISABLED,
+        )
+        record.description = manifest.description
+        return True
 
     # Check nurb version compatibility.
     nurb_version = _nurb_version()
@@ -174,6 +198,7 @@ def load_plugin(plugin_dir: Path) -> bool:
         version=manifest.version,
         source=str(plugin_dir),
     )
+    record.description = manifest.description
 
     # Import plugin.py if it exists.
     module = None
@@ -223,11 +248,40 @@ def load_all(project_root: Path | None = None) -> int:
 
     Returns the number of plugins successfully loaded.
     """
+    disabled = disabled_ids(project_root)
     loaded = 0
     for plugin_dir in _plugin_dirs(project_root):
         for child in _candidate_dirs(plugin_dir):
             if not (child / "plugin.toml").is_file():
                 continue  # not a plugin
-            if load_plugin(child):
+            if load_plugin(child, disabled=disabled):
                 loaded += 1
     return loaded
+
+
+def status_payload(project_root: Path | None = None) -> list[dict]:
+    """The JSON view of the registry, for `nurb plugins --json` and /api/plugins.
+
+    Includes every plugin the registry knows about: loaded, disabled, and
+    errored, so a surface that renders toggles can show all of them.
+    """
+    load_all(project_root)
+    disabled = disabled_ids(project_root)
+    out = []
+    for record in sorted(registry.all_plugins(), key=lambda r: r.plugin_id):
+        out.append(
+            {
+                "id": record.plugin_id,
+                "name": record.name,
+                "version": record.version,
+                "description": record.description,
+                "state": record.state.value,
+                "error": record.error,
+                "source": record.source,
+                "enabled": record.plugin_id not in disabled,
+                "commands": sorted(record.commands),
+                "mcpTools": sorted(record.mcp_tools),
+                "checks": len(record.build_check_fns),
+            }
+        )
+    return out
