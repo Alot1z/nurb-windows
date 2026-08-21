@@ -600,6 +600,16 @@ def cmd_plugins(args):
         print(f"  {len(errored)} plugin(s) failed to load and were skipped")
 
 
+# The subcommands nurb itself declares. A plugin command with one of these
+# names would otherwise be dispatched before argparse and silently shadow the
+# real command, so the dispatch in main() refuses them.
+BUILTIN_COMMANDS = frozenset({
+    "new", "dev", "launcher", "build", "check", "rules", "api", "plugins",
+    "inspect", "scan", "compare", "skill", "update", "verify", "extract",
+    "card", "diff", "slice", "stress", "render", "export",
+})
+
+
 # `render`'s iso direction at unit length, for tilting a finding camera toward it.
 ISO = (0.588, -0.630, 0.504)
 
@@ -1273,10 +1283,25 @@ def main(argv=None):
 
     args_list = list(sys.argv[1:] if argv is None else argv)
     load_all(project_root())
-    if args_list and registry.has_command(args_list[0]):
+    # A plugin command must not shadow a builtin: "build" and "check" are the
+    # commands an agent guesses first, and a plugin that registers them would
+    # hijack the real ones. The registry still records the name so `nurb
+    # plugins` shows it, but main() refuses to dispatch it.
+    if (
+        args_list
+        and args_list[0] not in BUILTIN_COMMANDS
+        and registry.has_command(args_list[0])
+    ):
         handler, plugin_id = registry.command_handler(args_list[0])
         if handler:
-            handler(argparse.Namespace(project=str(project_root()), argv=args_list[1:]))
+            try:
+                handler(argparse.Namespace(project=str(project_root()), argv=args_list[1:]))
+            except Exception as exc:
+                # A builtin command's failure is one trimmed line; a plugin's
+                # must be too. The plugin code is third-party, so the message
+                # names the plugin and the failure, not a traceback.
+                print(f"  plugin {plugin_id!r} failed: {type(exc).__name__}: {exc}")
+                sys.exit(1)
             return
     p = argparse.ArgumentParser(
         prog="nurb",

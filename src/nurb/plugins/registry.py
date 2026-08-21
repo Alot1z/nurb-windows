@@ -33,6 +33,7 @@ class PluginRecord:
     state: PluginState = PluginState.UNLOADED
     module: Any = None
     error: str = ""
+    source: str = ""  # the plugin directory it was loaded from
     commands: dict[str, Callable] = field(default_factory=dict)
     mcp_tools: dict[str, dict] = field(default_factory=dict)
     build_check_fns: list[Callable] = field(default_factory=list)
@@ -53,18 +54,27 @@ class PluginRegistry:
         name: str,
         version: str,
         module: Any = None,
+        source: str = "",
     ) -> PluginRecord:
-        """Register a plugin. Returns the record for further population."""
-        if plugin_id in self._plugins:
-            existing = self._plugins[plugin_id]
-            if existing.state == PluginState.LOADED:
-                return existing  # idempotent
+        """Register a plugin. Returns the record for further population.
+
+        Idempotent for the same source (a second load_all pass must not
+        duplicate contributions). A different source with the same ID replaces
+        the earlier record wholesale, so a project-local plugin overrides a
+        shipped example with the same ID.
+        """
+        existing = self._plugins.get(plugin_id)
+        if existing and existing.source == source and existing.state == PluginState.LOADED:
+            return existing  # idempotent: same dir scanned again
+        if existing:
+            self.unregister(plugin_id)
         record = PluginRecord(
             plugin_id=plugin_id,
             name=name,
             version=version,
             module=module,
             state=PluginState.LOADED,
+            source=source,
         )
         self._plugins[plugin_id] = record
         return record
@@ -124,10 +134,15 @@ class PluginRegistry:
             record.mcp_tools[tool_name] = tool_def
 
     def add_build_check(self, check_fn: Callable, plugin_id: str) -> None:
-        """Register a build check function from a plugin."""
-        self._build_checks.append((plugin_id, check_fn))
+        """Register a build check function from a plugin.
+
+        Idempotent: a second load_all pass over the same plugin must not run
+        the check twice, so re-registering the same function is a no-op.
+        """
+        if (plugin_id, check_fn) not in self._build_checks:
+            self._build_checks.append((plugin_id, check_fn))
         record = self._plugins.get(plugin_id)
-        if record:
+        if record and check_fn not in record.build_check_fns:
             record.build_check_fns.append(check_fn)
 
     # -- Lookup methods --

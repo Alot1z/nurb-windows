@@ -142,13 +142,17 @@ def run(shape, ctx=None, only=None, stop=None):
         found.extend(fn(shape, ctx))
     # Plugin checks run after the built-in rules. A plugin check that raises is
     # skipped with a warning: a broken third-party check must not fail the part.
-    from .plugins import registry
+    # `only` restricts the caller to named rules, which a plugin check cannot
+    # be; slicing's brim probe asks for warp_risk/stability alone and must not
+    # have a plugin finding flip the brim decision. None means "everything".
+    if only is None:
+        from .plugins import registry
 
-    for check_fn in registry.build_check_functions():
-        try:
-            found.extend(check_fn(shape, ctx))
-        except Exception as exc:
-            log.warning("plugin check failed, skipped: %s", exc)
+        for check_fn in registry.build_check_functions():
+            try:
+                found.extend(check_fn(shape, ctx))
+            except Exception as exc:
+                log.warning("plugin check failed, skipped: %s", exc)
     # A part in pieces gets judged on whichever piece the kernel listed first, so the
     # rest of the report is true of a fragment and misleading about the part. The
     # `solids` docstring has the whole argument; this is where it takes effect.

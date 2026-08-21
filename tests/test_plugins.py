@@ -247,9 +247,11 @@ def register(registry, manifest):
     d1 = write_plugin(tmp_path, name="one", plugin_py=plugin_py)
     d2 = write_plugin(tmp_path, name="two", plugin_py=plugin_py)
     assert load_plugin(d1) is True
-    assert load_plugin(d2) is True  # same id: returns existing record
+    # Same id, different directory: the later load replaces the earlier
+    # wholesale (the documented "later dirs win"), leaving exactly one record.
+    assert load_plugin(d2) is True
     assert len([p for p in registry.all_plugins() if p.plugin_id == "good-plugin"]) == 1
-    assert len(registry.all_mcp_tool_names()) == 0
+    assert len(registry.all_mcp_tool_names()) == 1  # only good_tool, no dupes
 
 
 def test_incompatible_plugin_is_skipped(tmp_path):
@@ -321,7 +323,8 @@ def register(registry, manifest):
     result = registry.call_mcp_tool("my_tool", {"x": 1})
     assert "got" in result["content"][0]["text"]
     assert registry.call_mcp_tool("unknown_tool", {}) is None
-    assert registry.all_mcp_tool_names() == ["my_tool"]
+    # my_tool from plugin.py and good_tool from the manifest declaration.
+    assert set(registry.all_mcp_tool_names()) == {"my_tool", "good_tool"}
 
 
 def test_duplicate_mcp_tool_name_rejected(tmp_path):
@@ -543,3 +546,201 @@ def register(registry, manifest):
     cli.main(["plugin-hello"])
     out = capsys.readouterr().out
     assert "hello from plugin command" in out
+
+
+# --- adversarial: boundaries found exercising the real entry points -----------
+
+
+def test_plugin_checks_skipped_when_only_restricts_rules(tmp_path):
+    """slicing.py runs checks.run(only=BRIM_RULES); a plugin check must not run."""
+    from nurb.checks import run
+
+    plugin_py = """
+from nurb.checks import Finding
+
+def check_thing(shape, ctx):
+    return [Finding("plugin-rule", "fail", "plugin said no")]
+
+def register(registry, manifest):
+    registry.add_build_check(check_thing, manifest.id)
+"""
+    write_plugin(tmp_path, name="checker", plugin_py=plugin_py)
+    assert load_plugin(tmp_path / "plugins" / "checker")
+
+    from build123d import Box
+
+    # Restricted run: the plugin check is anonymous, so it must not appear.
+    found = run(Box(10, 10, 10), only=set())
+    assert not any(f.rule == "plugin-rule" for f in found)
+    # Unrestricted run: it does.
+    found = run(Box(10, 10, 10))
+    assert any(f.rule == "plugin-rule" for f in found)
+
+
+def test_manifest_declared_mcp_tool_is_registered(tmp_path):
+    """A [[mcp.tools]] declaration alone registers the tool; the handler is
+    looked up by convention, and a missing handler says so over MCP."""
+    plugin_py = """
+def _mcp_handle_declared_tool(arguments):
+    return {"content": [{"type": "text", "text": "ran"}], "isError": False}
+
+def register(registry, manifest):
+    pass  # deliberately: no manual registration
+"""
+    manifest = GOOD_MANIFEST.replace(
+        'name = "good_tool"\ndescription = "A declared tool"',
+        'name = "declared_tool"\ndescription = "Declared only"',
+    )
+    d = write_plugin(tmp_path, name="decl", manifest=manifest, plugin_py=plugin_py)
+    assert load_plugin(d)
+    assert registry.has_mcp_tool("declared_tool")
+    assert registry.mcp_tool_def("declared_tool")["name"] == "declared_tool"
+    result = registry.call_mcp_tool("declared_tool", {})
+    assert result["content"][0]["text"] == "ran"
+
+
+def test_manifest_declared_tool_without_handler_reports_missing_handler(tmp_path):
+    """A declared tool with no _mcp_handle_ fn is listed but errors cleanly."""
+    from nurb import mcp
+
+    manifest = GOOD_MANIFEST.replace(
+        'name = "good_tool"\ndescription = "A declared tool"',
+        'name = "ghost_tool"\ndescription = "Declared, never implemented"',
+    )
+    d = write_plugin(tmp_path, name="ghost", manifest=manifest, plugin_py=None)
+    assert load_plugin(d)
+    assert registry.has_mcp_tool("ghost_tool")
+    with pytest.raises(mcp.McpError, match="no handler"):
+        mcp._handle(
+            {"method": "tools/call", "params": {"name": "ghost_tool", "arguments": {}}},
+            tmp_path,
+        )
+
+
+def test_plugin_command_cannot_shadow_builtin(tmp_path, capsys, monkeypatch):
+    """A plugin registering 'build' must not hijack `nurb build`."""
+    from nurb import cli
+
+    plugin_py = """
+def evil(args):
+    print("HACKED")
+
+def register(registry, manifest):
+    registry.add_command("build", evil, manifest.id)
+"""
+    d = write_plugin(tmp_path, name="evil", plugin_py=plugin_py)
+    assert load_plugin(d)
+    assert registry.has_command("build")  # recorded for `nurb plugins`
+    monkeypatch.setattr(cli, "project_root", lambda: tmp_path)
+    # argparse gets 'build' (no part named), not the plugin's handler.
+    with pytest.raises(SystemExit):
+        cli.main(["build"])
+    out = capsys.readouterr().out
+    assert "HACKED" not in out
+
+
+def test_plugin_command_exception_is_a_clean_error(tmp_path, capsys, monkeypatch):
+    """A raising plugin command prints one line and exits 1, no traceback."""
+    from nurb import cli
+
+    plugin_py = """
+def boom(args):
+    raise RuntimeError("plugin exploded")
+
+def register(registry, manifest):
+    registry.add_command("boom-cmd", boom, manifest.id)
+"""
+    d = write_plugin(tmp_path, name="boom", plugin_py=plugin_py)
+    assert load_plugin(d)
+    monkeypatch.setattr(cli, "project_root", lambda: tmp_path)
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["boom-cmd"])
+    assert exc.value.code == 1
+    out = capsys.readouterr().out
+    assert "good-plugin" in out and "RuntimeError" in out and "Traceback" not in out
+
+
+def test_later_plugin_dir_overrides_earlier_same_id(tmp_path, monkeypatch):
+    """A project-local plugin with the shipped example's ID wins wholesale."""
+    shipped = tmp_path / "shipped"
+    (shipped / "examples" / "dup").mkdir(parents=True)
+    (shipped / "examples" / "dup" / "plugin.toml").write_text(
+        GOOD_MANIFEST.replace('id = "good-plugin"', 'id = "dup"')
+        .replace("version = \"1.2.3\"", "version = \"1.0.0\""),
+        encoding="utf-8",
+    )
+    (shipped / "examples" / "dup" / "plugin.py").write_text(
+        """
+def a(args):
+    print("shipped")
+
+def register(registry, manifest):
+    registry.add_command("dup-cmd", a, manifest.id)
+""",
+        encoding="utf-8",
+    )
+    project = tmp_path / "project"
+    (project / "plugins" / "dup").mkdir(parents=True)
+    (project / "plugins" / "dup" / "plugin.toml").write_text(
+        GOOD_MANIFEST.replace('id = "good-plugin"', 'id = "dup"')
+        .replace("version = \"1.2.3\"", "version = \"2.0.0\""),
+        encoding="utf-8",
+    )
+    (project / "plugins" / "dup" / "plugin.py").write_text(
+        """
+def b(args):
+    print("project")
+
+def register(registry, manifest):
+    registry.add_command("dup-cmd", b, manifest.id)
+""",
+        encoding="utf-8",
+    )
+
+    import nurb.plugins.loader as mod
+
+    # Point the loader at two explicit dirs so the test needs no repo layout.
+    monkeypatch.setattr(mod, "_BUILTIN_DIR", shipped)
+    monkeypatch.setattr(mod, "_USER_DIR", shipped / "nouser")  # nonexistent: skipped
+    n = mod.load_all(project)
+    assert n >= 2
+    record = registry.get("dup")
+    assert record.version == "2.0.0"  # the project's copy won
+    handler, pid = registry.command_handler("dup-cmd")
+    # The shipped handler was unregistered with its record.
+    assert pid == "dup"
+
+
+def test_failed_register_leaves_no_partial_contributions(tmp_path):
+    """A plugin that registers a command then raises must not keep the command."""
+    plugin_py = """
+def half(args):
+    print("half registered")
+
+def register(registry, manifest):
+    registry.add_command("half-cmd", half, manifest.id)
+    raise ValueError("wiring broke after the command")
+"""
+    d = write_plugin(tmp_path, name="half", plugin_py=plugin_py)
+    assert load_plugin(d) is False
+    assert registry.get("good-plugin").state == PluginState.ERROR
+    assert not registry.has_command("half-cmd")
+    assert registry.command_handler("half-cmd") == (None, None)
+
+
+def test_double_load_all_does_not_duplicate_build_checks(tmp_path):
+    """Idempotent load_all: a second pass must not run build checks twice."""
+    plugin_py = """
+def check_thing(shape, ctx):
+    return []
+
+def register(registry, manifest):
+    registry.add_build_check(check_thing, manifest.id)
+"""
+    d = write_plugin(tmp_path, name="checker", plugin_py=plugin_py)
+    assert load_all(tmp_path) >= 1
+    first = registry.get("good-plugin")
+    assert len(first.build_check_fns) == 1
+    load_all(tmp_path)
+    assert len(registry.get("good-plugin").build_check_fns) == 1
+    assert len(registry.build_check_functions()) == 1
