@@ -2,6 +2,20 @@
 
 The [README](README.md) is about using nurb. This file is about hacking on it.
 
+## This fork: nurb-windows
+
+This repository is the Windows port of nurb (upstream: `Shpigford/nurb`). It
+adds a Windows platform layer (`src/nurb/platform/`), a plugin system
+(`src/nurb/plugins/` and `plugins/`, see `docs/windows/PLUGINS.md`), a Tauri
+desktop app (`desktop/`), and the CI gates that keep the fork's Windows
+behavior from being lost in an upstream merge.
+
+Porting an upstream release is a real procedure, not a merge: classify every
+conflicted path with the decision rule and run the strict gate before and
+after. Follow `docs/windows/PORTING.md` and `docs/windows/PORTING-MERGE-CHECKLIST.md`.
+Never merge with one side winning wholesale, and never let a port remove the
+platform layer, the plugin system, or the gates.
+
 ## How it works
 
 ### The dev loop

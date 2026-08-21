@@ -1,0 +1,16 @@
+[plugin]
+id = "everything"
+name = "Everything"
+version = "0.1.0"
+description = "Windows file search via voidtools Everything (es.exe)"
+author = "nurb-windows"
+license = "MIT"
+
+[capabilities]
+commands = true
+mcp_tools = true
+build_checks = false
+
+[[mcp.tools]]
+name = "everything_search"
+description = "Search filenames with voidtools Everything (es.exe) when it is on PATH"

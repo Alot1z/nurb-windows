@@ -1,0 +1,20 @@
+[plugin]
+id = "my-plugin"
+name = "My Plugin"
+version = "0.1.0"
+description = "One line about what this plugin does"
+author = "You"
+license = "MIT"
+# min_nurb = "0.22.0"   # optional: oldest nurb this works with
+# max_nurb = "0.99.0"   # optional: newest nurb this works with
+
+[capabilities]
+commands = true      # adds CLI commands
+mcp_tools = true     # adds MCP tools
+build_checks = false # adds printability checks
+
+# Declare MCP tools here; the runtime implementation lives in plugin.py
+# under a _mcp_handle_<name> function.
+# [[mcp.tools]]
+# name = "my_tool"
+# description = "What my_tool does"
