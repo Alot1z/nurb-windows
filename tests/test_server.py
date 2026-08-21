@@ -35,6 +35,29 @@ def project(tmp_path):
     return server
 
 
+def test_plugins_api_reflects_project_state(tmp_path):
+    """The real server route re-reads state after a project toggle."""
+    from nurb.plugins.state import set_enabled
+
+    (tmp_path / "parts").mkdir()
+    server = Server(tmp_path)
+    request = SimpleNamespace(path="/api/plugins", headers={})
+
+    first = asyncio.run(server.http(None, request))
+    assert first.status_code == 200
+    initial = json.loads(first.body)
+    everything = next(p for p in initial if p["id"] == "everything")
+    assert everything["state"] == "loaded"
+
+    set_enabled(tmp_path, "everything", False)
+    second = asyncio.run(server.http(None, request))
+    updated = json.loads(second.body)
+    everything = next(p for p in updated if p["id"] == "everything")
+    assert everything["state"] == "disabled"
+    assert everything["enabled"] is False
+    assert everything["commands"] == []
+
+
 CARD = """# thing
 
 ```toml

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
 import { playChime, setSoundEnabled, soundEnabled } from "./chime";
@@ -40,6 +40,9 @@ export default function Settings({
   };
 
   const [installing, setInstalling] = useState<string | null>(null);
+  // Serialize writes per plugin. Two quick clicks otherwise race in the Rust
+  // command and the earlier choice can overwrite the later one on disk.
+  const pluginWrites = useRef<Record<string, Promise<void>>>({});
 
   const toggleExtension = (id: string, enabled: boolean) => {
     invoke("set_extension_enabled", { id, enabled })
@@ -58,9 +61,20 @@ export default function Settings({
   // Engine plugins: the toggle writes the project's .nurb/plugins.toml, the
   // same file `nurb plugin enable|disable` writes, so both surfaces agree.
   const togglePlugin = (id: string, enabled: boolean) => {
-    invoke("set_plugin_enabled", { path: projectPath, id, enabled })
-      .then(onPluginsChanged)
-      .catch(() => {});
+    const previous = pluginWrites.current[id] ?? Promise.resolve();
+    const write = previous
+      .catch(() => {})
+      .then(() => invoke("set_plugin_enabled", { path: projectPath, id, enabled }))
+      .then(() => undefined);
+    pluginWrites.current[id] = write;
+    void write
+      .then(() => {
+        if (pluginWrites.current[id] === write) onPluginsChanged();
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (pluginWrites.current[id] === write) delete pluginWrites.current[id];
+      });
   };
 
   const changeFolder = async () => {

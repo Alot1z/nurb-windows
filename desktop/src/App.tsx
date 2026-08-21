@@ -260,6 +260,11 @@ function App() {
   // panel's Plugins section. Distinct from extensions: plugins extend the
   // engine (CLI/MCP/checks); extensions are CLIs the app hosts in a terminal.
   const [pluginStatuses, setPluginStatuses] = useState<PluginStatus[]>([]);
+  // Every request gets a generation so a response from a project/server that
+  // was just left cannot overwrite the active project's registry.
+  const pluginRequestGeneration = useRef(0);
+  const activePluginPath = useRef<string | null>(null);
+  activePluginPath.current = active;
   const [showExtensions, setShowExtensions] = useState(false);
   const [terminalExt, setTerminalExt] = useState<ExtensionStatus | null>(null);
   const [showGeminiKey, setShowGeminiKey] = useState(false);
@@ -528,14 +533,32 @@ function App() {
   // Plugins change rarely (a toggle, a scaffold), so they refresh on project
   // switch and after a Settings toggle, not on a poll.
   const refreshPlugins = useCallback(() => {
-    if (!active) {
+    const generation = ++pluginRequestGeneration.current;
+    const path = active;
+    if (!path) {
       setPluginStatuses([]);
       return;
     }
-    invoke<PluginStatus[]>("plugin_statuses", { path: active })
-      .then((list) => setPluginStatuses(Array.isArray(list) ? list : []))
-      .catch(() => setPluginStatuses([]));
+    invoke<PluginStatus[]>("plugin_statuses", { path })
+      .then((list) => {
+        if (
+          pluginRequestGeneration.current !== generation ||
+          activePluginPath.current !== path
+        ) return;
+        setPluginStatuses(Array.isArray(list) ? list : []);
+      })
+      .catch(() => {
+        if (
+          pluginRequestGeneration.current === generation &&
+          activePluginPath.current === path
+        ) setPluginStatuses([]);
+      });
   }, [active]);
+  // Invalidate an in-flight request when the selected project or its server
+  // changes, including the transition to no active project.
+  useEffect(() => {
+    pluginRequestGeneration.current += 1;
+  }, [active, activeServer]);
   useEffect(() => {
     if (!active || !activeServer) {
       setPartState(null);
@@ -566,6 +589,11 @@ function App() {
       clearInterval(timer);
     };
   }, [active, activeServer, refreshPlugins]);
+  // Re-opened Settings is a synchronization boundary: a CLI or another app
+  // may have changed `.nurb/plugins.toml` while Settings was closed.
+  useEffect(() => {
+    if (showSettings && activeServer) refreshPlugins();
+  }, [showSettings, activeServer, refreshPlugins]);
 
   const parts = partState?.path === active ? partState.parts : NO_PARTS;
   const placedIn = useMemo(() => placedInMap(parts), [parts]);

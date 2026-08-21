@@ -709,7 +709,7 @@ def register(registry, manifest):
     monkeypatch.setattr(mod, "_BUILTIN_DIR", shipped)
     monkeypatch.setattr(mod, "_USER_DIR", shipped / "nouser")  # nonexistent: skipped
     n = mod.load_all(project)
-    assert n >= 2
+    assert n == 1  # duplicate ids resolve to one loaded record
     record = registry.get("dup")
     assert record.version == "2.0.0"  # the project's copy won
     handler, pid = registry.command_handler("dup-cmd")
@@ -804,12 +804,14 @@ def register(registry, manifest):
     registry.add_mcp_tool("disable_me_tool", {"name": "disable_me_tool"}, manifest.id)
 """
     write_plugin(tmp_path, name="disable-me", plugin_id="disable-me", plugin_py=plugin_py)
-    assert load_all(tmp_path) >= 1
+    initial_loaded = load_all(tmp_path)
+    assert initial_loaded >= 1
     assert registry.get("disable-me").state == PluginState.LOADED
     assert registry.has_command("disable-me-cmd")
 
     set_enabled(tmp_path, "disable-me", False)
     assert disabled_ids(tmp_path) == {"disable-me"}
+    assert load_all(tmp_path) == initial_loaded - 1  # the disabled plugin is excluded
     registry.clear()
     load_all(tmp_path)
     record = registry.get("disable-me")
@@ -855,10 +857,13 @@ def register(registry, manifest):
     write_plugin(tmp_path, name="cli-plugin", plugin_id="cli-plugin", plugin_py=plugin_py)
     monkeypatch.setattr(cli, "project_root", lambda: tmp_path)
 
+    cli.main(["plugins"])
+    assert registry.has_command("cli-plugin-hello")
     cli.main(["plugin", "disable", "cli-plugin"])
     assert "disabled" in capsys.readouterr().out
     assert registry.get("cli-plugin").state == PluginState.DISABLED
     assert not registry.has_command("cli-plugin-hello")
+    assert registry.command_handler("cli-plugin-hello") == (None, None)
 
     cli.main(["plugin", "enable", "cli-plugin"])
     assert "enabled" in capsys.readouterr().out
@@ -874,6 +879,27 @@ def register(registry, manifest):
 
 
 # --- status payload and JSON -------------------------------------------------
+
+
+def test_load_all_isolated_between_projects(tmp_path):
+    """A project reload cannot inherit commands from the previous project."""
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    plugin_py = """
+def first_command(args):
+    return None
+
+def register(registry, manifest):
+    registry.add_command("first-only-command", first_command, manifest.id)
+"""
+    write_plugin(first, name="first-plugin", plugin_id="first-plugin", plugin_py=plugin_py)
+    write_plugin(second, name="second-plugin", plugin_id="second-plugin")
+    load_all(first)
+    assert registry.has_command("first-only-command")
+    load_all(second)
+    assert not registry.has_command("first-only-command")
+    assert registry.get("first-plugin") is None
+    assert registry.get("second-plugin") is not None
 
 
 def test_status_payload_shape(tmp_path):
