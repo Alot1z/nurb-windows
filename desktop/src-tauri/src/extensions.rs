@@ -301,6 +301,11 @@ impl Extensions {
             discover(m).ok_or_else(|| format!("{id} is not installed on this machine"))?;
         Ok((exe, m))
     }
+
+    /// The static manifest for an extension, regardless of install state.
+    pub fn manifest(&self, id: &str) -> Result<&'static Manifest, String> {
+        manifest(id).ok_or_else(|| format!("unknown extension: {id}"))
+    }
 }
 
 #[cfg(test)]

@@ -32,10 +32,20 @@ export default function Settings({
     if (on) playChime();
   };
 
+  const [installing, setInstalling] = useState<string | null>(null);
+
   const toggleExtension = (id: string, enabled: boolean) => {
     invoke("set_extension_enabled", { id, enabled })
       .then(onExtensionsChanged)
       .catch(() => {});
+  };
+
+  const installExtension = (id: string) => {
+    setInstalling(id);
+    invoke("install_extension", { id })
+      .then(() => onExtensionsChanged())
+      .catch(() => {})
+      .finally(() => setInstalling(null));
   };
 
   const changeFolder = async () => {
@@ -104,9 +114,22 @@ export default function Settings({
                   />
                   {ext.label}
                   {!ext.installed && (
-                    <span className="tag tag-off" style={{ marginLeft: 6 }}>
-                      not installed
-                    </span>
+                    <>
+                      <span className="tag tag-off" style={{ marginLeft: 6 }}>
+                        not installed
+                      </span>
+                      <button
+                        className="rail-button"
+                        style={{ marginLeft: 6, fontSize: '0.8em', padding: '2px 8px' }}
+                        disabled={installing === ext.id}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          installExtension(ext.id);
+                        }}
+                      >
+                        {installing === ext.id ? 'installing...' : 'install'}
+                      </button>
+                    </>
                   )}
                 </label>
               ))}
