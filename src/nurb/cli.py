@@ -570,6 +570,35 @@ def cmd_api(args):
     for line in api.report():
         print(line)
 
+def cmd_plugins(args):
+    """List loaded plugins and what each contributes."""
+    from .plugins import load_all, registry
+
+    load_all(project_root())
+    records = registry.all_plugins()
+    if not records:
+        print("  no plugins loaded")
+        return
+    for record in records:
+        bits = [f"{record.plugin_id} {record.version}"]
+        if record.state.value == "error":
+            bits.append(f"[error: {record.error}]")
+        elif record.state.value == "loaded":
+            caps = []
+            if record.commands:
+                caps.append(f"{len(record.commands)} command(s)")
+            if record.mcp_tools:
+                caps.append(f"{len(record.mcp_tools)} mcp tool(s)")
+            if record.build_check_fns:
+                caps.append(f"{len(record.build_check_fns)} check(s)")
+            bits.append("[" + ", ".join(caps) + "]" if caps else "[no capabilities]")
+        else:
+            bits.append(f"[{record.state.value}]")
+        print("  " + " ".join(bits))
+    errored = registry.errored_plugins()
+    if errored:
+        print(f"  {len(errored)} plugin(s) failed to load and were skipped")
+
 
 # `render`'s iso direction at unit length, for tilting a finding camera toward it.
 ISO = (0.588, -0.630, 0.504)
@@ -1237,6 +1266,18 @@ def cmd_launcher(args):
 
 
 def main(argv=None):
+    # Plugin commands are not argparse subcommands: the parser would reject an
+    # unknown name before the plugin ever saw it. Dispatch them up front, then
+    # let the parser handle everything nurb itself declares.
+    from .plugins import load_all, registry
+
+    args_list = list(sys.argv[1:] if argv is None else argv)
+    load_all(project_root())
+    if args_list and registry.has_command(args_list[0]):
+        handler, plugin_id = registry.command_handler(args_list[0])
+        if handler:
+            handler(argparse.Namespace(project=str(project_root()), argv=args_list[1:]))
+            return
     p = argparse.ArgumentParser(
         prog="nurb",
         description="agentic CAD for 3D printing",
@@ -1285,6 +1326,9 @@ def main(argv=None):
 
     s = sub.add_parser("api", help="the vocabulary a part file gets, with signatures")
     s.set_defaults(fn=cmd_api)
+
+    s = sub.add_parser("plugins", help="list loaded plugins and what each contributes")
+    s.set_defaults(fn=cmd_plugins)
 
     s = sub.add_parser("inspect", help="measure a built part: faces, normals, concave edges")
     s.add_argument("part", nargs="?")

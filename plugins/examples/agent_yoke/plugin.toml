@@ -1,0 +1,16 @@
+[plugin]
+id = "agent-yoke"
+name = "Agent-Yoke"
+version = "0.1.0"
+description = "Agent Yoke platform: inventory, skills, and MCP registry via the universal CLI"
+author = "nurb-windows"
+license = "MIT"
+
+[capabilities]
+commands = true
+mcp_tools = true
+build_checks = false
+
+[[mcp.tools]]
+name = "agent_yoke_status"
+description = "Check whether the agent-yoke universal CLI is installed and report its version"

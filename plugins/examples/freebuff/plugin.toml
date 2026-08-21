@@ -1,0 +1,16 @@
+[plugin]
+id = ""
+name = ""
+version = "0.1.0"
+description = "Free coding agent integration via terminal or MCP"
+author = "nurb-windows"
+license = "MIT"
+
+[capabilities]
+commands = true
+mcp_tools = true
+build_checks = false
+
+[[mcp.tools]]
+name = "_status"
+description = "Check if  CLI is installed and available on PATH"
