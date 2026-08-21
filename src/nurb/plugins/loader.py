@@ -157,11 +157,22 @@ def load_plugin(plugin_dir: Path) -> bool:
         )
         return False
 
-    # Register the plugin identity.
+    # A second load_all pass over the same directory must not re-import the
+    # module: a fresh import produces fresh function objects, which would
+    # duplicate build checks and re-run every registration. Same source and
+    # already loaded means the record is current; report success.
+    existing = registry.get(manifest.id)
+    if existing and existing.source == str(plugin_dir) and existing.state == PluginState.LOADED:
+        return True
+
+    # Register the plugin identity. A different source with the same ID
+    # replaces the earlier record, so a project-local plugin overrides a
+    # shipped example; the registry handles that wholesale swap.
     record = registry.register(
         plugin_id=manifest.id,
         name=manifest.name,
         version=manifest.version,
+        source=str(plugin_dir),
     )
 
     # Import plugin.py if it exists.
@@ -173,6 +184,8 @@ def load_plugin(plugin_dir: Path) -> bool:
         except Exception as exc:
             error_msg = f"import error: {exc}"
             log.warning("plugin %s failed to import: %s", manifest.id, exc)
+            # A failed load must not leave half-registered contributions live.
+            registry.unregister(manifest.id)
             registry.mark_error(manifest.id, error_msg)
             return False
 
@@ -183,8 +196,24 @@ def load_plugin(plugin_dir: Path) -> bool:
         except Exception as exc:
             error_msg = f"register() failed: {exc}"
             log.warning("plugin %s register() failed: %s", manifest.id, exc)
+            registry.unregister(manifest.id)
             registry.mark_error(manifest.id, error_msg)
             return False
+
+    # Manifest-declared MCP tools that the module did not itself register are
+    # registered here: the [[mcp.tools]] table is the declaration contract,
+    # and the handler is looked up by convention (_mcp_handle_<name>).
+    for decl in manifest.mcp_tool_decls:
+        if not registry.has_mcp_tool(decl.name):
+            registry.add_mcp_tool(
+                decl.name,
+                {
+                    "name": decl.name,
+                    "description": decl.description,
+                    "inputSchema": {"type": "object", "properties": {}},
+                },
+                manifest.id,
+            )
 
     return True
 
