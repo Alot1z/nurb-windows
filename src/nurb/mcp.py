@@ -367,6 +367,10 @@ def _handle(message, project):
             result = registry.call_mcp_tool(name, arguments)
             if result is not None:
                 return result
+            # The tool is listed (its manifest declared it) but the plugin
+            # registered no handler for it. "unknown tool" would be a lie,
+            # so say what is actually missing.
+            raise McpError(-32602, f"plugin tool {name!r} has no handler")
         return _call_tool(name, arguments, project)
     if method == "resources/list":
         return {"resources": _resources(project)}
