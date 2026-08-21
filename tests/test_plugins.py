@@ -397,6 +397,8 @@ def test_everything_plugin_finds_fake_executable_on_path(tmp_path):
     bindir.mkdir()
     fake = bindir / ("es.exe" if sys.platform == "win32" else "es")
     fake.write_text("#!/bin/sh\necho es fake\n", encoding="utf-8")
+    if sys.platform != "win32":
+        os.chmod(str(fake), 0o755)
 
     spec = importlib.util.spec_from_file_location(
         "everything_example", "plugins/examples/everything/plugin.py"
