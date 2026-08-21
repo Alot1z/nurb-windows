@@ -170,14 +170,7 @@ pub struct ExternalAgent {
 /// The list is empty by default; the extension runtime handles terminal-hosted
 /// and external-app agents separately. This array exists for agents that
 /// predate the extension system and have no ACP interface.
-pub const EXTERNAL: &[ExternalAgent] = &[
-    ExternalAgent {
-        id: "",
-        label: "",
-        note: "Free coding agent. Works with the  CLI (npm install -g ). The app hosts it in a terminal; you drive the session.",
-        install: "npm install -g ",
-    },
-];
+pub const EXTERNAL: &[ExternalAgent] = &[];
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]

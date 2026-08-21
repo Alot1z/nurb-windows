@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
 import { playChime, setSoundEnabled, soundEnabled } from "./chime";
 import type { ExtensionStatus } from "./ExtensionsModal";
+import type { PluginStatus } from "./plugins";
 
 type Props = {
   folder: string;
@@ -11,6 +12,9 @@ type Props = {
   onReset: () => void | Promise<void>;
   extensions: ExtensionStatus[];
   onExtensionsChanged: () => void;
+  plugins: PluginStatus[];
+  onPluginsChanged: () => void;
+  projectPath: string;
   onClose: () => void;
 };
 
@@ -21,6 +25,9 @@ export default function Settings({
   onReset,
   extensions,
   onExtensionsChanged,
+  plugins,
+  onPluginsChanged,
+  projectPath,
   onClose,
 }: Props) {
   const [sound, setSound] = useState(soundEnabled);
@@ -46,6 +53,14 @@ export default function Settings({
       .then(() => onExtensionsChanged())
       .catch(() => {})
       .finally(() => setInstalling(null));
+  };
+
+  // Engine plugins: the toggle writes the project's .nurb/plugins.toml, the
+  // same file `nurb plugin enable|disable` writes, so both surfaces agree.
+  const togglePlugin = (id: string, enabled: boolean) => {
+    invoke("set_plugin_enabled", { path: projectPath, id, enabled })
+      .then(onPluginsChanged)
+      .catch(() => {});
   };
 
   const changeFolder = async () => {
@@ -130,6 +145,30 @@ export default function Settings({
                         {installing === ext.id ? 'installing...' : 'install'}
                       </button>
                     </>
+                  )}
+                </label>
+              ))}
+            </>
+          )}
+          {plugins.length > 0 && (
+            <>
+              <h3>Plugins</h3>
+              <p>Engine plugins for this project; a disabled plugin is never loaded.</p>
+              {plugins.map((p) => (
+                <label className="settings-toggle" key={p.id} title={p.description}>
+                  <input
+                    type="checkbox"
+                    checked={p.enabled}
+                    onChange={(e) => togglePlugin(p.id, e.target.checked)}
+                  />
+                  {p.name}
+                  <span className="tag" style={{ marginLeft: 6 }}>
+                    {p.version}
+                  </span>
+                  {p.state === "error" && (
+                    <span className="tag tag-off" style={{ marginLeft: 6 }}>
+                      error
+                    </span>
                   )}
                 </label>
               ))}

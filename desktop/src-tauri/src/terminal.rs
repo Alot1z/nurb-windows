@@ -178,7 +178,7 @@ pub fn set_extension_enabled(
     extensions.lock().unwrap().set_enabled(&id, enabled)
 }
 
-/// Run the install command for an extension (e.g. `npm install -g `).
+/// Run the install command for an extension (e.g. `npm install -g some-cli`).
 /// The command comes from the compile-time BUILTIN table, never from user input.
 #[tauri::command]
 pub fn install_extension(
@@ -188,7 +188,7 @@ pub fn install_extension(
     let manifest = extensions.lock().unwrap().manifest(&id)?;
     let install_cmd = manifest.install.to_string();
     // Split into program + args. The BUILTIN install strings are simple
-    // (`npm install -g `), so shell-style splitting is safe.
+    // (`npm install -g some-cli`), so shell-style splitting is safe.
     let parts: Vec<&str> = install_cmd.split_whitespace().collect();
     if parts.is_empty() {
         return Err("install command is empty".into());

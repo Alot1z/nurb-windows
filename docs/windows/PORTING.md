@@ -101,9 +101,11 @@ Plus, after any workflow change: parse the YAML (`.github/workflows/*.yml`).
 The plugin system is entirely fork-specific and does not exist upstream:
 
 - `src/nurb/plugins/` - manifest parsing, the registry, the loader.
-- `plugins/examples/` - the shipped example plugins (, everything,
-  agent-yoke).
-- `plugins/_template/` - the scaffolding template.
+- `plugins/examples/` - the shipped example plugins (everything, agent-yoke).
+- `plugins/_template/` - the scaffolding template behind `nurb plugin new`.
+- `src/nurb/plugins/state.py` - per-project enable/disable state
+  (`<project>/.nurb/plugins.toml`), shared by the CLI and the desktop Settings
+  panel.
 - `tests/test_plugins.py` - the plugin suite.
 - `docs/windows/PLUGINS.md` - the plugin contract.
 
