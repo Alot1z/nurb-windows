@@ -178,6 +178,39 @@ pub fn set_extension_enabled(
     extensions.lock().unwrap().set_enabled(&id, enabled)
 }
 
+/// Run the install command for an extension (e.g. `npm install -g `).
+/// The command comes from the compile-time BUILTIN table, never from user input.
+#[tauri::command]
+pub fn install_extension(
+    extensions: tauri::State<std::sync::Mutex<crate::extensions::Extensions>>,
+    id: String,
+) -> Result<String, String> {
+    let manifest = extensions.lock().unwrap().manifest(&id)?;
+    let install_cmd = manifest.install.to_string();
+    // Split into program + args. The BUILTIN install strings are simple
+    // (`npm install -g `), so shell-style splitting is safe.
+    let parts: Vec<&str> = install_cmd.split_whitespace().collect();
+    if parts.is_empty() {
+        return Err("install command is empty".into());
+    }
+    let mut cmd = std::process::Command::new(parts[0]);
+    cmd.args(&parts[1..]);
+    cmd.stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let output = cmd
+        .spawn()
+        .map_err(|e| format!("failed to start '{}': {e}", parts[0]))?
+        .wait_with_output()
+        .map_err(|e| format!("failed to run '{}': {e}", parts[0]))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if output.status.success() {
+        Ok(format!("{stdout}{stderr}"))
+    } else {
+        Err(format!("install failed (exit {}): {stderr}", output.status.code().unwrap_or(-1)))
+    }
+}
+
 /// Open a Terminal-host extension in a ConPTY session pointed at the project.
 /// Only the extension registry decides what runs: `extension` must name a known
 /// Terminal manifest, and its executable must be the user's own install. This

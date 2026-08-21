@@ -524,6 +524,7 @@ pub fn run() {
             agents::agent_login,
             terminal::extension_statuses,
             terminal::set_extension_enabled,
+            terminal::install_extension,
             terminal::open_terminal_extension,
             terminal::launch_external_extension,
             terminal::terminal_input,
