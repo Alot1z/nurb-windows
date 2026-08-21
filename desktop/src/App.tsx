@@ -1316,6 +1316,8 @@ function App() {
           customized={projectsFolder !== null}
           onChange={changeProjectsFolder}
           onReset={() => changeProjectsFolder(null)}
+          extensions={extStatuses}
+          onExtensionsChanged={refreshExtensions}
           onClose={() => setShowSettings(false)}
         />
       )}
