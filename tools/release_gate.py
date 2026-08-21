@@ -46,6 +46,7 @@ def check_clean_tree() -> tuple[str, bool, str]:
         for line in proc.stdout.splitlines()
         if line
         and not line.startswith("?? .dev/")
+        and not line.startswith("?? .freebuff/")
 
     ]
     if bad:
