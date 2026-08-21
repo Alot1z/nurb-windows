@@ -218,11 +218,15 @@ class PluginRegistry:
         return [fn for _, fn in self._build_checks]
 
     def clear(self) -> None:
-        """Remove all plugins. Used in tests."""
+        """Remove all plugins. Used in tests and explicit reloads."""
         self._plugins.clear()
         self._commands.clear()
         self._mcp_tools.clear()
         self._build_checks.clear()
+
+    def refresh(self) -> None:
+        """Drop the current registry before a deliberate project reload."""
+        self.clear()
 
 
 # Module-level singleton.
