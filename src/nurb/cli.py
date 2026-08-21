@@ -629,6 +629,7 @@ def _cmd_plugin_set(args, enabled: bool):
         print("  `nurb plugins` lists the ids nurb knows about")
         sys.exit(1)
     set_enabled(root, args.id, enabled)
+    registry.refresh()
     load_all(root)  # re-read so the registry reflects the change immediately
     current = registry.get(args.id)
     state = current.state.value if current else "unknown"

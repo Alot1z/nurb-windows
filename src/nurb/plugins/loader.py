@@ -246,17 +246,20 @@ def load_plugin(plugin_dir: Path, disabled: set[str] | None = None) -> bool:
 def load_all(project_root: Path | None = None) -> int:
     """Discover and load all plugins from all configured directories.
 
-    Returns the number of plugins successfully loaded.
+    Each call is a complete snapshot for that project. The registry is a
+    process-wide singleton, so clearing it here prevents a plugin loaded for a
+    previously opened project from leaking into a project that does not have
+    it. Direct ``load_plugin`` calls remain incremental for focused tests and
+    embedders.
     """
+    registry.refresh()
     disabled = disabled_ids(project_root)
-    loaded = 0
     for plugin_dir in _plugin_dirs(project_root):
         for child in _candidate_dirs(plugin_dir):
             if not (child / "plugin.toml").is_file():
                 continue  # not a plugin
-            if load_plugin(child, disabled=disabled):
-                loaded += 1
-    return loaded
+            load_plugin(child, disabled=disabled)
+    return len(registry.loaded_plugins())
 
 
 def status_payload(project_root: Path | None = None) -> list[dict]:
