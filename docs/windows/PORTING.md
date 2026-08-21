@@ -1,33 +1,143 @@
-﻿# Windows porting guide
+# Porting upstream nurb releases into the Windows fork
 
-## Development prerequisites
+This fork (nurb-windows) tracks upstream nurb and adds a Windows platform layer.
+A future upstream release is ported by an AI agent following the workflow
+below. The companion `docs/windows/PORTING-MERGE-CHECKLIST.md` holds the
+per-file decision rule and the worked conflict map from v0.21.0; this guide is
+the end-to-end procedure and the map of what is Windows-specific.
 
-Use Windows 10/11 x64 first. The supported engineering toolchain is Python 3.13, uv, Node.js, Rust/MSVC, and the Tauri CLI.
+## What this fork owns
 
-## Architecture rule
+These are the fork's contributions. Upstream work that touches them must be
+**ADAPT**ed or **KEEP**-decided, never blindly overwritten:
 
-Keep upstream nurb behavior in `src/nurb/**` whenever possible. Put OS-specific behavior in `src/nurb/platform/**` or in the desktop Rust layer.
+- `src/nurb/platform/` - the OS-specific layer (paths, process handling, shell
+  invocation). Fork-additive; upstream has nothing here.
+- `src/nurb/cli.py`, `src/nurb/server.py`, `src/nurb/mcp.py` - upstream code
+  with Windows adaptations inside (per-user config paths, process routing).
+- `src/nurb/plugins/` and `plugins/` - the plugin system, fork-only.
+- `desktop/` - the Tauri desktop app (React + Rust), fork-only.
+- `tools/upstream_sync.py`, `tools/release_gate.py` - the fork's CI gates.
+- `tests/` - includes fork tests (`test_plugins.py`, Windows-skip decorators).
+- `.github/workflows/` - the fork's Windows CI.
 
-## Runtime
+What tracks upstream closely (usually **PORT** on conflict): the CAD engine
+modules (`builder.py`, `checks.py`, `polish.py`, `orient.py`, `card.py`), the
+doctrine, the shipped printer profiles, and `pyproject.toml` version bumps.
 
-The desktop release provisions Python through the existing uv-based runtime and provisions its Node adapter runtime under app data. Windows uses `Scripts/` for Python executables and `node.exe` at the root of the Node archive.
+## Before you start
 
-## Process handling
+```bash
+git fetch upstream main
+python tools/upstream_sync.py status --strict   # tells you which paths drifted
+python tools/release_gate.py                    # current state must be READY
+```
 
-Do not add ad-hoc `taskkill`, `process_group`, shell commands, or Windows-only subprocess flags inside feature modules. Route child ownership through `desktop/src-tauri/src/process.rs`.
+The strict gate classifies every path as SAFE (fork and upstream identical),
+REVIEW (both changed), or WINDOWS-SPECIFIC. A clean start is a pure-ahead fork:
+all drift is yours, upstream is behind you. If the gate reports anything else,
+stop and reconcile before porting anything.
 
-## Paths
+## The port, step by step
 
-Use `pathlib.Path` in Python and `PathBuf` in Rust. Never construct a Windows path by concatenating slash-delimited strings.
+1. **Inspect the upstream release.** `git log --oneline upstream/main` since
+   the last merged upstream commit. Read the release notes and the diffs of
+   every touched file, not just the file names.
+2. **Compare against this fork.** For each upstream change, find the fork's
+   version of the file. Identical files are not exempt: history, callers, and
+   dependencies differ even when content does not.
+3. **Identify conflicts.** `git merge --no-commit --no-ff upstream/main`
+   enumerates them. Classify every conflicted path with the decision rule in
+   `PORTING-MERGE-CHECKLIST.md` (PORT / ADAPT / KEEP / REWRITE / DROP / DEFER).
+4. **Understand architectural changes before resolving.** A new parameter, a
+   renamed module, or a moved responsibility upstream means the fork's callers
+   change too. Read the upstream PR or issue that introduced the change when
+   the diff alone is not self-explanatory.
+5. **Map into the Windows fork.** Resolve each conflict semantically:
+   upstream's structure with the fork's Windows behavior inside it (ADAPT),
+   fork content winning (KEEP), or a fresh write (REWRITE). Never resolve by
+   taking one side wholesale.
+6. **Preserve the Windows adaptations.** After the merge, verify the platform
+   layer, the process routing, the per-user config paths, and the plugin system
+   are intact. `git diff upstream/main --stat` shows what the fork still owns.
+7. **Run the tests.** `uv run --project . pytest tests/ --collect-only` first
+   (a post-merge patch that dropped an import fails at collection, which is a
+   suite failure, not a test failure), then the full suite.
+8. **Fix regressions.** A failing fork test is a real regression, not noise.
+   Fix the code, never delete the test.
+9. **Review the diff.** `git diff` from the merge base: every change is either
+   the upstream feature or a deliberate fork adaptation, and nothing private
+   (`.dev/`, tokens, machine paths) is in it.
+10. **Verify packaging.** `python tools/release_gate.py` must read READY, and
+    `python tools/upstream_sync.py status --strict` must exit 0.
+11. **Commit.** One commit per merge, message naming the upstream release and
+    the notable decisions.
 
-## Shell/tool invocation
+## The verification gate (do not skip)
 
-Prefer executable paths plus argument arrays. Avoid `shell=True`. When a platform command is unavoidable, isolate it in a platform layer and add a Windows test.
+```bash
+python tools/upstream_sync.py status --strict   # exit 0: no SAFE-zone drift
+python tools/release_gate.py                    # release-gate: READY
+uv run --project . pytest tests/ --collect-only
+uv run --project . pytest tests/
+```
 
-## Testing
+Plus, after any workflow change: parse the YAML (`.github/workflows/*.yml`).
 
-At minimum run the Windows Python suite, desktop frontend tests, Tauri target compilation, and staging before considering a Windows change complete.
+## Breaking upstream changes to watch for
 
-## Upstream changes
+- **API changes in build123d** (the CAD kernel): geometry code in parts and
+  modules breaks loudly; watch for renamed builders in upstream `builder.py`.
+- **New shipped data files**: upstream adding to `printers.toml` or the
+  doctrine means the fork's copies need the same addition (they are PORT-zone).
+- **Agent-skill contract files**: `src/nurb/skill.md`, `src/nurb/agents.md`,
+  and `skills/nurb/SKILL.md` must stay in lockstep. Tests assert the three are
+  one body; changing one without the others breaks CI.
+- **CLI surface changes**: new flags in upstream `cli.py` must also reach the
+  fork's `mcp.py` tool definitions and the desktop app, which mirror the CLI.
 
-Run `python tools/upstream_sync.py status` before porting an upstream update. Review all `WINDOWS-SPECIFIC` and `REVIEW` files before merging.
+## Where the plugin system lives (fork-only)
+
+The plugin system is entirely fork-specific and does not exist upstream:
+
+- `src/nurb/plugins/` - manifest parsing, the registry, the loader.
+- `plugins/examples/` - the shipped example plugins (, everything,
+  agent-yoke).
+- `plugins/_template/` - the scaffolding template.
+- `tests/test_plugins.py` - the plugin suite.
+- `docs/windows/PLUGINS.md` - the plugin contract.
+
+Upstream merges will not touch these. If a future upstream release ever adds
+its own plugin concept, reconcile the two before layering one on the other:
+decide which registry wins and keep a single manifest format.
+
+## What an AI agent should never do
+
+- Do not merge with `--strategy-option theirs` and push the result. Every
+  conflict needs a classification, and the classification needs the fork's
+  tests to pass.
+- Do not drop the fork's CI gates to get a merge to go through.
+- Do not copy `.dev/` or any private material into the port. The repo is
+  public; the gate and the diff review are the checks that keep it that way.
+- Do not "clean up" the Windows-skip decorators or the platform layer. They
+  are the point of the fork.
+- Do not commit a merge where `git diff upstream/main --stat` shows the
+  platform layer or the plugin system deleted.
+
+## The short version for a routine release
+
+```bash
+git fetch upstream main
+git merge --no-commit --no-ff upstream/main
+python tools/upstream_sync.py status --strict      # classify before resolving
+# resolve per PORTING-MERGE-CHECKLIST.md decision rule
+git merge --continue
+python tools/upstream_sync.py status --strict      # must exit 0
+python tools/release_gate.py                       # must be READY
+uv run --project . pytest tests/ --collect-only
+uv run --project . pytest tests/
+```
+
+Document each resolved path in the checklist's table before finishing. The
+strict gate only tells you what drifted; the table is where the reasoning
+lives.

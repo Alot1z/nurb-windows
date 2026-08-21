@@ -353,9 +353,21 @@ def _handle(message, project):
     if method == "ping":
         return {}
     if method == "tools/list":
-        return {"tools": TOOLS}
+        from .plugins import registry
+
+        return {"tools": TOOLS + registry.all_mcp_tool_defs()}
     if method == "tools/call":
-        return _call_tool(message.get("params", {}).get("name", ""), message.get("params", {}).get("arguments"), project)
+        from .plugins import registry
+
+        name = message.get("params", {}).get("name", "")
+        arguments = message.get("params", {}).get("arguments")
+        # A plugin tool is dispatched by the plugin registry; a builtin tool
+        # keeps its existing path. A name in neither set errors below.
+        if registry.has_mcp_tool(name):
+            result = registry.call_mcp_tool(name, arguments)
+            if result is not None:
+                return result
+        return _call_tool(name, arguments, project)
     if method == "resources/list":
         return {"resources": _resources(project)}
     if method == "resources/read":
@@ -367,6 +379,9 @@ def serve(project):
     """The stdio loop: read one JSON object per line, answer requests, ignore
     notifications, keep the server alive across tool failures."""
     project = pathlib.Path(project).resolve()
+    from .plugins import load_all
+
+    load_all(project)
     for line in sys.stdin:
         line = line.strip()
         if not line:
