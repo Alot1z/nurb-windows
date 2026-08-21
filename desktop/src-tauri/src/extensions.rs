@@ -82,7 +82,20 @@ pub struct Manifest {
 ///
 /// Developer-only extensions are disabled by default and shown only in the
 /// developer surface, not in the normal release feature set.
-const BUILTIN: &[Manifest] = &[];
+const BUILTIN: &[Manifest] = &[
+    Manifest {
+        id: "",
+        label: "",
+        version: "0.1.0",
+        min_app_version: "0.20.1",
+        dev_only: false,
+        host: HostKind::Terminal,
+        lookups: &[Lookup::OnPath("")],
+        launch: &["", "--cwd", "{project}"],
+        install: "npm install -g ",
+        note: "Free coding agent. Human drives the session in a terminal; nurb hosts the terminal but never parses or injects into it.",
+    },
+];
 
 // To add a built-in extension, push a Manifest entry to BUILTIN above. For
 // example:
