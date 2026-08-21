@@ -26,13 +26,13 @@ scan_tree_forbidden() {
     matches="$(git ls-tree -r "$sha" 2>/dev/null \
         | awk '{print $4}' \
         | grep -v '^\.githooks/' \
-        | grep -v '^\.devignore$$\|^\.gitignore$$' \
+        | grep -v '^\.devignore$\|^\.gitignore$' \
         | while read -r path; do
             blob_id="$(git ls-tree -r "$sha" -- "$path" 2>/dev/null \
                 | awk '{print $3}' | head -1)"
             if [ -n "$blob_id" ]; then
                 git cat-file -p "$blob_id" 2>/dev/null \
-                    | grep -iE '|' \
+                    | grep -iE 'freebuff|codebuff' \
                     | sed "s/^/$path: /"
             fi
         done)"
@@ -47,9 +47,9 @@ scan_commit_log() {
     local sha="$1"
     if git log -1 --format='%B' "$sha" 2>/dev/null \
         | grep -vE '^🤖' \
-        | grep -iE '|' >/dev/null; then
+        | grep -iE 'freebuff|codebuff' >/dev/null; then
         printf 'forbidden phrase in commit %s message:\n' "$sha" >&2 >&2
-        git log -1 --format='%B' "$sha" | grep -iE '|' >&2
+        git log -1 --format='%B' "$sha" | grep -iE 'freebuff|codebuff' >&2
         return 1
     fi
     return 0
