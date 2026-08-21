@@ -20,6 +20,7 @@ class PluginState(enum.Enum):
 
     UNLOADED = "unloaded"
     LOADED = "loaded"
+    DISABLED = "disabled"  # found and valid, but off for this project
     ERROR = "error"
 
 
@@ -30,6 +31,7 @@ class PluginRecord:
     plugin_id: str
     name: str
     version: str
+    description: str = ""
     state: PluginState = PluginState.UNLOADED
     module: Any = None
     error: str = ""
@@ -55,16 +57,17 @@ class PluginRegistry:
         version: str,
         module: Any = None,
         source: str = "",
+        state: PluginState = PluginState.LOADED,
     ) -> PluginRecord:
         """Register a plugin. Returns the record for further population.
 
-        Idempotent for the same source (a second load_all pass must not
-        duplicate contributions). A different source with the same ID replaces
-        the earlier record wholesale, so a project-local plugin overrides a
-        shipped example with the same ID.
+        Idempotent for the same source and state (a second load_all pass must
+        not duplicate contributions). A different source with the same ID, or
+        a state change (enabled -> disabled), replaces the earlier record
+        wholesale, dropping its stale contributions.
         """
         existing = self._plugins.get(plugin_id)
-        if existing and existing.source == source and existing.state == PluginState.LOADED:
+        if existing and existing.source == source and existing.state == state:
             return existing  # idempotent: same dir scanned again
         if existing:
             self.unregister(plugin_id)
@@ -73,7 +76,7 @@ class PluginRegistry:
             name=name,
             version=version,
             module=module,
-            state=PluginState.LOADED,
+            state=state,
             source=source,
         )
         self._plugins[plugin_id] = record

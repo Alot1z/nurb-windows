@@ -105,63 +105,9 @@ All extensions are developer-only and opt-in by default. Nothing in the
 extension system itself is blocked; individual extensions may have additional
 release requirements.
 
-##  integration
+## Engine plugins
 
- is a terminal-hosted extension registered in the builtin table. The
-app discovers the `` CLI on PATH, launches it in a ConPTY terminal
-panel, and passes `--cwd {project}` so  opens the user's project.
-The human drives the session; nurb hosts the terminal but never parses or
-injects into it.
-
-### MCP server configuration
-
- is also an MCP client (Claude Code format). It can call nurb's
-built-in MCP server to run `nurb build`, `nurb check`, `nurb inspect`,
-and15 other tools directly. Add this to your  `mcp.json` (usually
-at `~/.config/manicode//mcp.json` or wherever your  config
-lives):
-
-
-
-If nurb is installed globally (not via uv), use:
-
-
-
-Replace `/path/to/your/nurb/project` with the actual path to your nurb
-project (the directory containing `parts/`).
-
-### What  can do through MCP
-
-Once configured,  can call these nurb tools:
-
-- `nurb_build` - build a part and report dimensions
-- `nurb_check` - run printability checks
-- `nurb_inspect` - measure faces, normals, concave edges
-- `nurb_export` - export to 3MF/STL/STEP/GLB
-- `nurb_new` - create a new part file
-- `nurb_card` - regenerate a part card
-- `nurb_diff` - compare part to card
-- `nurb_stress` - static stress analysis
-- `nurb_scan` - measure a mesh file
-- `nurb_compare` - compare part to target mesh
-- `nurb_rules` - print the design doctrine
-- `nurb_api` - print the vocabulary
-- `nurb_extract` - find duplication across parts
-- `nurb_slice` - estimate print time and filament
-- `nurb_render` - write a PNG of a part
-- `nurb_skill` - print the agent skill file
-- `nurb_update` - upgrade nurb
-
-### Human-in-the-loop contract
-
-The MCP path and the terminal path serve different purposes:
-
-- **Terminal path** (extension panel): 's own TUI, its own auth, its
-  own model. The human types, nurb hosts. This is the primary integration.
-- **MCP path** (mcp.json):  calls nurb tools as if they were its
-  own. This is useful for automation within a  session, but the human
-  must start and stay present in every session per 's Terms of Service.
-
-Both paths are legitimate. The terminal path is simpler and more honest about
-what  is. The MCP path is more powerful but requires the human to
-understand that  is calling nurb's tools, not its own.
+The extension system above hosts interactive CLIs. The engine's own plugin
+system (CLI commands, MCP tools, build checks) is separate and lives in
+`docs/windows/PLUGINS.md`. Installed engine plugins are listed and toggled
+in the desktop Settings panel.

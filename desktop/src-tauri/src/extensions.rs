@@ -37,6 +37,10 @@ impl HostKind {
 
 /// Where the extension's executable may live. Declarative so the registry
 /// stays generic and future extensions are just data.
+///
+/// No extension ships in this build, so no variant is constructed yet; the
+/// table below is the design contract the next BUILTIN entry fills in.
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 pub enum Lookup {
     /// A bare executable name resolved through PATH. npm's global bin lands
@@ -82,20 +86,10 @@ pub struct Manifest {
 ///
 /// Developer-only extensions are disabled by default and shown only in the
 /// developer surface, not in the normal release feature set.
-const BUILTIN: &[Manifest] = &[
-    Manifest {
-        id: "",
-        label: "",
-        version: "0.1.0",
-        min_app_version: "0.20.1",
-        dev_only: false,
-        host: HostKind::Terminal,
-        lookups: &[Lookup::OnPath("")],
-        launch: &["", "--cwd", "{project}"],
-        install: "npm install -g ",
-        note: "Free coding agent. Human drives the session in a terminal; nurb hosts the terminal but never parses or injects into it.",
-    },
-];
+// No builtin extensions ship in this build; the registry is ready for them.
+// The desktop Settings panel still shows the section, and the modal reports
+// "No extensions shipped in this build" when it is empty.
+const BUILTIN: &[Manifest] = &[];
 
 // To add a built-in extension, push a Manifest entry to BUILTIN above. For
 // example:
@@ -120,6 +114,7 @@ pub fn manifest(id: &str) -> Option<&'static Manifest> {
 /// Register a manifest at runtime (for user-loaded extensions). The manifest
 /// is validated: ID must be unique, host kind must be known, and the minimum
 /// app version must be parseable.
+#[allow(dead_code)] // kept as the stable API surface for the next BUILTIN entry
 pub fn register(_manifest: Manifest) -> Result<(), String> {
     // User extensions are the next step; for now the registry is builtin-only.
     // This stub exists so the public API surface is stable when user

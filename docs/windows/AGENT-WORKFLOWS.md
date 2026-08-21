@@ -81,10 +81,6 @@ reference again. Never build an agent hierarchy for appearance.
   `AGENTS.md` at repo root for instructions. The fork keeps its
   maintainer instructions in `docs/windows/` and the user-facing skill in
   `agents.md`; both are reachable from any harness that reads the repo.
-- **/**: session-scoped agent with file + terminal tools and
-  a suggestions surface. No separate skill format to maintain beyond the
-  repo's own files; the same docs and gates apply.
-
 The fork's maintenance knowledge is already machine-addressable (gates,
 docs, checklist). The only genuinely useful additions are the two personal
 items above, because they remove repeated model reasoning, which is exactly
