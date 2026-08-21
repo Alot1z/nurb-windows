@@ -34,12 +34,10 @@ def check(name: str, ok: bool, detail: str = "") -> tuple[str, bool, str]:
 
 def check_clean_tree() -> tuple[str, bool, str]:
     """The working tree should be in a state that signals a release is
-    ready to commit. The private developer scratch space is allowed
-    under either of its two valid root-level names - the policy
-    `.dev/` or the historical `./` - because both are gitignored
-    and never staged. Everything else (modifications and new untracked
-    files outside those two) means work-in-progress that should be
-    committed first."""
+    ready to commit. The private developer scratch space under `.dev/`
+    is allowed because it is gitignored and never staged. Everything
+    else (modifications and new untracked files outside that) means
+    work-in-progress that should be committed first."""
     proc = run(["git", "status", "--short"])
     if proc.returncode != 0:
         return check("clean-tree", False, proc.stderr.strip())
@@ -48,7 +46,7 @@ def check_clean_tree() -> tuple[str, bool, str]:
         for line in proc.stdout.splitlines()
         if line
         and not line.startswith("?? .dev/")
-        and not line.startswith("?? ./")
+
     ]
     if bad:
         modified = sum(1 for l in bad if l.startswith(" M") or l.startswith("M "))
@@ -61,7 +59,7 @@ def check_clean_tree() -> tuple[str, bool, str]:
     return check(
         "clean-tree",
         True,
-        "tree clean except private .dev/ or ./ scratch",
+        "tree clean except private .dev/ scratch",
     )
 
 
@@ -83,12 +81,11 @@ def check_private_key_ignored() -> tuple[str, bool, str]:
 
 
 def check_private_dev_space_untracked() -> tuple[str, bool, str]:
-    """.dev/ (the policy-mandated local-only scratch space) and the
-    historical `./` root-level scratch must not be in the git
-    index. Both are gitignored so accidental `git add -A` cannot leak
-    either, but a historical or manual `git add -f` is the failure mode
-    this check is here to catch."""
-    proc = run(["git", "ls-files", ".dev/", "./"])
+    """.dev/ (the policy-mandated local-only scratch space) must not
+    be in the git index. It is gitignored so accidental `git add -A`
+    cannot leak it, but a historical or manual `git add -f` is the
+    failure mode this check is here to catch."""
+    proc = run(["git", "ls-files", ".dev/"])
     if proc.stdout.strip():
         return check(
             "private-space-untracked",
@@ -98,7 +95,7 @@ def check_private_dev_space_untracked() -> tuple[str, bool, str]:
     return check(
         "private-space-untracked",
         True,
-        ".dev/ and ./ scratch not tracked",
+        ".dev/ scratch not tracked",
     )
 
 
