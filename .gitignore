@@ -16,3 +16,6 @@ wheels/
 
 # Per-worktree dev server state written by the SessionStart hook
 .DS_Store
+
+# Conductor's local, per-checkout settings (not meant to be shared/committed)
+.conductor/
