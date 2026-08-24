@@ -63,11 +63,18 @@ SUBSCRIPTIONS = {
 # update alongside them. Combos without an entry render numbers-only. The plan label
 # always comes from SUBSCRIPTIONS, never from here, so rows stay consistent.
 VERDICTS = {
-    ("claude", "fable", "high"): "Flawless so far: every part, every job, right the first time. When a measurement was missing, it did the honest thing unprompted. The premium pick.",
-    ("claude", "opus", "high"): "Flawless on everything it has rows for, a notch slower than fable. Its design-job row is being re-run under a longer session limit after the old limit cut its trials short; the numbers here are only from completed sessions.",
-    ("codex", "gpt-5.5", "medium"): "Excellent and fast, and honest about the unmeasured dimension. One design quietly stopped fitting when the cable bundle grew, which is the kind of flaw you find after printing.",
-    ("claude", "sonnet", "high"): "Perfect on instructions and honest about the unmeasured dimension, but slow. Its design-job trials all ran past the old session limit and were graded mid-thought, which is not a fair grade in either direction, so that row was thrown out and is being re-run with a longer limit.",
-    ("claude", "haiku", "low"): "Fine when you spell everything out, and cheap. Asked to design, it produced parts you would not print: paper-thin walls, screw holes that are not round. And it wrote its guess for the unmeasured dimension down as if it had measured it, the mistake that ruins a print six months later.",
+    ("claude", "claude-fable-5", "high"): "Twenty-four attempts, twenty-three parts worth printing. It checked its own work in every one of them: it cuts the part open, measures what it just built, and fixes what it finds before it stops. The one miss was a D-shaft knob with a socket that did not hold the stem. The most expensive row on the board.",
+    ("claude", "claude-sonnet-5", "xhigh"): "Right on all six jobs, and the slowest route there by a wide margin. One design job ran past forty minutes. Pick it when the part matters more than the wait.",
+    ("grok", "grok-4.6", "high"): "Only three of the six jobs have been run at this effort, so this is an unfinished row rather than a clean sweep. It got those three right. The low-effort Grok row has the full set and is four times faster.",
+    ("claude", "claude-sonnet-5", "high"): "Right on eleven of twelve tries and honest about the unmeasured dimension. The one miss was a wall clip that came out slightly off its stated sizes, not a part that fails to print. Around thirteen minutes a part is the real cost here.",
+    ("grok", "grok-4.6", "low"): "The value pick, and it is not close: seventeen of eighteen parts right, about two minutes each, for pennies. Both of the hard fit jobs came out right every time. Its one miss was a wall clip you could not get a screwdriver into.",
+    ("claude", "claude-opus-5", "low"): "One attempt per job, so read this as a sample rather than a score. Five of six right, and the miss was the easiest job on the board: a cable clip built to the stated size that stopped tracking once the size changed.",
+    ("claude", "claude-sonnet-5", "medium"): "The same result as high effort, for about the same money and no faster, down to the same cable clip that stopped tracking its own dimensions. One design job ran fifty minutes. If you want Sonnet perfect, xhigh is the row that gets there.",
+    ("claude", "claude-sonnet-5", "low"): "Fast and cheap for a Claude plan, and it slips exactly where the jobs stop handing over dimensions: a wall clip with no way in for the screwdriver, a rest the pole could not drop into, a knob too narrow to turn. Fine for parts you spell out in full.",
+    ("codex", "gpt-5.6-terra", "low"): "Everything it made built, and about half were worth printing. The pattern is a part that works at the size you stated and nowhere else: all three of its wall clips stopped fitting when the cable bundle changed, and one pole rest came out flat where the job needed a curve. It never once went back to measure what it had made.",
+    ("codex", "gpt-5.6-luna", "low"): "Cheap, fast, and right five times out of eighteen. It wrote the pole's size straight into the file and still built a rest the pole would not drop into, at that size or any other. Elsewhere it left a 0.3mm wall no printer will lay down, and once wrote its guess at the unmeasured dimension down as though it had measured it.",
+    ("claude", "claude-haiku-4-5-20251001", "low"): "Fine when you spell every dimension out, and cheap. Asked to design, it produced parts you would not print: it came apart on all three design jobs, with walls and sockets that break the printability rules outright. It did handle the missing measurement honestly.",
+    ("claude", "claude-haiku-4-5-20251001", "high"): "The weakest row here, and the extra effort did not help. Two parts of twelve came out right. It also wrote its guess at the unmeasured dimension down as though it had measured it, which is the mistake nobody catches until the print is wrong six months later.",
 }
 
 HEAD = """\
@@ -175,7 +182,10 @@ HEAD = """\
   .chart .dot { transition: r .1s; }
   .chart .dot:hover { r: 8; }
   .board { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
-  .board .hd, .board summary { display: grid; grid-template-columns: 2rem minmax(0,1.3fr) minmax(7.5rem,1fr) 7.5rem 5.2rem 5.8rem; gap: 1rem; align-items: center; padding: .7rem 1.1rem; }
+  /* The model column sizes to the longest pinned id, which is a dated one like
+     claude-haiku-4-5-20251001; wrap its effort onto a second line and that row
+     stands taller than every other. */
+  .board .hd, .board summary { display: grid; grid-template-columns: 2rem minmax(0,1.7fr) minmax(6.5rem,1fr) 7.5rem 5.2rem 5.8rem; gap: 1rem; align-items: center; padding: .7rem 1.1rem; }
   .board .hd { font-size: .72rem; color: var(--dimmer); text-transform: uppercase; letter-spacing: .06em; border-bottom: 1px solid var(--line); }
   .board .hd .r { text-align: right; }
   .board details { border-bottom: 1px solid var(--line); }
@@ -186,7 +196,7 @@ HEAD = """\
   .board details.top summary { box-shadow: inset 3px 0 0 var(--accent); }
   .rank { color: var(--dimmer); font-size: .85rem; }
   .top .rank { color: var(--accent); font-weight: 700; }
-  .who .model { font-weight: 700; }
+  .who .model { font-weight: 700; white-space: nowrap; }
   .who .model small { color: var(--dim); font-weight: 400; font-size: .82em; }
   .who .plan { font-size: .78rem; color: var(--dim); display: flex; align-items: center; gap: .4rem; }
   .who .plan i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
@@ -205,8 +215,18 @@ HEAD = """\
   .time, .cost { font-size: .85rem; color: var(--dim); text-align: right; white-space: nowrap; }
   .board .body { padding: .2rem 1.1rem 1.2rem 4.1rem; }
   @media (max-width: 720px) {
-    .board .hd, .board summary { grid-template-columns: 2rem minmax(0,1fr) minmax(6rem,1fr) 4.6rem; }
-    .cells, .cost, .board .hd .c4, .board .hd .c6 { display: none; }
+    /* A phone fits the rank, the model, and the number the board ranks on. Pinned
+       ids are long enough that keeping a fourth column here costs the model name
+       two extra wrapped lines, and every verdict that turns on speed says so in
+       words anyway. */
+    .board .hd, .board summary { grid-template-columns: 1.6rem minmax(0,1.5fr) minmax(4.5rem,1fr); gap: .6rem; padding: .7rem .8rem; }
+    /* Narrow enough that a dated model id cannot fit on one line, and holding it
+       there would scroll the page sideways. A taller row is the cheaper trade. */
+    .who .model { white-space: normal; }
+    /* Break before the separator, never after it: a line ending in a lone middot
+       reads as something the renderer dropped. */
+    .who .model small { white-space: nowrap; }
+    .cells, .cost, .time, .board .hd .c4, .board .hd .c5, .board .hd .c6 { display: none; }
     .board .body { padding-left: 1.1rem; }
   }
   .verdict { color: var(--dim); font: 14.5px/1.55 var(--sans); margin-bottom: .9rem; max-width: 680px; }
@@ -336,9 +356,14 @@ for (const b of document.querySelectorAll('[data-copy]')) {
 
 
 def _combos(summary):
-    """Fold per-task rows into one entry per harness+model+effort, best score first.
-    The resolved ids ride along in the key so two same-label groups (a floating
-    alias that served different models) never silently overwrite each other."""
+    """Fold per-task rows into one entry per harness+model+effort, best first.
+
+    Ordered by first-try rate, because that is the number the board leads with and
+    what the page tells the reader the ranking means. Mean score breaks ties, so two
+    models that print the same fraction of parts first time are separated by how
+    close the misses came. The resolved ids ride along in the key so two same-label
+    groups (a floating alias that served different models) never silently overwrite
+    each other."""
     combos = {}
     for row in summary:
         key = (row["harness"], row["model"], row["effort"],
@@ -346,9 +371,10 @@ def _combos(summary):
         combos.setdefault(key, {})[row["task"]] = row
     order = []
     for key, tasks in combos.items():
+        firsts, total, _, _, _ = _stats(tasks)
         mean = sum(r["score"] for r in tasks.values()) / len(tasks)
-        order.append((mean, key, tasks))
-    order.sort(key=lambda item: -item[0])
+        order.append(((firsts / total if total else 0.0, mean), key, tasks))
+    order.sort(key=lambda item: (-item[0][0], -item[0][1]))
     return [(key, tasks) for _, key, tasks in order]
 
 
@@ -397,11 +423,16 @@ def _time_note(minutes, capped):
 def _answers(combos):
     """One card per subscription: the best combo for the plan the visitor already
     pays for, because the subscription is a constraint, not a tradeoff axis."""
+    # A combo that has not run every job cannot be recommended over one that has:
+    # a perfect score on half the board is a thinner claim than a near-perfect one
+    # on all of it. Completeness sorts first, so a partial row wins only when it is
+    # the sole row for that subscription.
+    jobs = len(JOBS)
     best = {}
     for key, tasks in combos:
         harness = key[0]
         firsts, total, minutes, capped, dollars = _stats(tasks)
-        rank = (firsts / total if total else 0, -minutes)
+        rank = (len(tasks) >= jobs, firsts / total if total else 0, -minutes)
         if harness not in best or rank > best[harness][0]:
             best[harness] = (rank, key, (firsts, total, minutes, capped, dollars))
     cards = []
@@ -419,6 +450,85 @@ def _answers(combos):
             f"</div>"
         )
     return "\n".join(cards)
+
+
+# 12px JetBrains Mono is monospace, so a label's width is its character count. Close
+# enough to reserve space with, which is all the placement below needs.
+_LABEL_ADVANCE = 7.05
+_DOT_GAP = 12
+_ARROW_GAP = 34
+
+
+def _label_sides(points, sx, sy, plot_left, plot_right):
+    """Which side of its dot each label sits on.
+
+    Three things want the space beside a dot: the label, its neighbours' labels, and
+    the effort line joining a model's own variants, which runs through the label's
+    row when it leaves at a shallow angle. Preference first, then the plot edges get
+    a veto, then one sweep resolves whatever still overlaps. A label that cannot go
+    anywhere clean keeps its preferred side, because a collision inside the plot
+    still reads better than a label hanging over the axis.
+    """
+    placed = {}
+    boxes = []
+    for p in points:
+        x, y = sx(p["minutes"]), sy(p["rate"])
+        width = len(f"{p['model']} \u00b7 {p['effort']}") * _LABEL_ADVANCE
+        crowd = any(
+            q is not p and abs(sy(q["rate"]) - y) < 16 and 0 < sx(q["minutes"]) - x < 170
+            for q in points
+        )
+        # The crowd rule only reaches 170px, and an effort line undercuts its label
+        # from any distance, so a same-model point to the right counts at any gap.
+        undercut = any(
+            q is not p
+            and (q["harness"], q["model"]) == (p["harness"], p["model"])
+            and abs(sy(q["rate"]) - y) < 20
+            and sx(q["minutes"]) > x
+            for q in points
+        )
+        boxes.append(
+            {
+                "point": p, "x": x, "y": y, "width": width,
+                "flip": crowd or undercut or x > plot_right - 140,
+            }
+        )
+
+    def span(box, flip):
+        if flip:
+            return box["x"] - _DOT_GAP - box["width"], box["x"] - _DOT_GAP
+        start = box["x"] + (_ARROW_GAP if box["point"]["capped"] else _DOT_GAP)
+        return start, start + box["width"]
+
+    def fits(box, flip):
+        lo, hi = span(box, flip)
+        return lo >= plot_left and hi <= plot_right
+
+    for box in boxes:
+        if not fits(box, box["flip"]) and fits(box, not box["flip"]):
+            box["flip"] = not box["flip"]
+
+    def collides(box, flip):
+        lo, hi = span(box, flip)
+        for other in boxes:
+            if other is box or abs(other["y"] - box["y"]) >= 11:
+                continue
+            if lo - 7 < other["x"] < hi + 7:  # someone else's dot inside this label
+                return True
+            olo, ohi = span(other, other["flip"])
+            if lo < ohi and olo < hi:
+                return True
+        return False
+
+    for box in boxes:
+        if collides(box, box["flip"]) and fits(box, not box["flip"]) \
+                and not collides(box, not box["flip"]):
+            box["flip"] = not box["flip"]
+
+    for box in boxes:
+        lo, hi = span(box, box["flip"])
+        placed[id(box["point"])] = (("end", hi) if box["flip"] else ("start", lo)) + (lo, hi)
+    return placed
 
 
 def _chart(combos):
@@ -493,21 +603,12 @@ def _chart(combos):
                 f'<path d="{path}" fill="none" stroke="{color}" stroke-width="2" opacity=".35"/>'
             )
 
+    sides = _label_sides(points, sx, sy, left, width - right)
+
     for p in points:
         x, y = sx(p["minutes"]), sy(p["rate"])
         color = SUBSCRIPTIONS.get(p["harness"], ("", "var(--dim)"))[1]
-        # Label side: flip left near the right edge or when a same-height neighbor
-        # sits close to the right; ink color, never the series color.
-        crowd = any(
-            q is not p
-            and abs(sy(q["rate"]) - y) < 16
-            and 0 < sx(q["minutes"]) - x < 170
-            for q in points
-        )
-        flip = crowd or x > width - right - 140
-        # A capped point owns the space to its right (the floor arrow lives there),
-        # so its label starts past the arrowhead.
-        anchor, lx = ("end", x - 12) if flip else ("start", x + (34 if p["capped"] else 12))
+        anchor, lx, label_lo, label_hi = sides[id(p)]
         title = (
             f"{p['model']} ({p['effort']} effort): {p['firsts']}/{p['total']} first-try, "
             f"{_time_note(p['minutes'], p['capped'])}"
@@ -521,6 +622,12 @@ def _chart(combos):
         parts.append(
             f'<circle class="dot" cx="{x:.0f}" cy="{y:.0f}" r="6" fill="{color}" stroke="var(--panel)" stroke-width="2">'
             f"<title>{html.escape(title)}</title></circle>"
+            # An effort line runs between two dots of the same model and passes
+            # through the row of one of their labels. A glyph-hugging halo only masks
+            # it at the strokes and leaves it showing between letters, so the label
+            # gets a backing rect and reads as text on the panel, not text on a rule.
+            f'<rect x="{label_lo - 3:.0f}" y="{y - 7:.0f}" width="{label_hi - label_lo + 6:.0f}"'
+            f' height="14" fill="var(--panel)"/>'
             f'<text x="{lx:.0f}" y="{y + 4:.0f}" text-anchor="{anchor}" font-size="12" fill="var(--text)">'
             f'{html.escape(p["model"])} <tspan fill="var(--dimmer)">&middot; {html.escape(p["effort"])}</tspan></text>'
         )
@@ -617,7 +724,7 @@ def render(summary):
         cards = (
             '<div class="board">\n'
             '<div class="hd"><span></span><span>model</span><span>first-try prints</span>'
-            '<span class="c4">jobs</span><span class="r">time</span><span class="r c6">$/part</span></div>\n'
+            '<span class="c4">jobs</span><span class="r c5">time</span><span class="r c6">$/part</span></div>\n'
             f"{rows}\n</div>"
         )
     else:
