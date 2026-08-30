@@ -59,7 +59,27 @@ Open your agent in the directory where the project should live, and talk:
 
 The agent does the rest: reads the design doctrine, creates the project, models the part, runs the printability checks, and starts `nurb dev` so you get a link to watch. Every save updates the browser without moving your camera, and check findings pin themselves to the geometry. When it looks right: drag the sliders if you want, click `3mf`, print. A `write` button saves your slider values back into the file's defaults, where the agent will see them.
 
-## A part
+## Which model should you use?
+
+nurb works with whatever AI subscription you already pay for, and they are not equally good at designing parts. We run the popular models through the same real part-design jobs and grade the actual geometry by machine, so you can pick based on what you subscribe to and what you are willing to spend: [nurb.dev/benchmarks](https://nurb.dev/benchmarks.html). The raw rows, transcripts, and grading code live in [Shpigford/nurb-benchmarks](https://github.com/Shpigford/nurb-benchmarks), and adding a row for your model is one line on your own subscription, single runs welcome:
+
+```bash
+curl -fsSL https://nurb.dev/bench.sh | sh
+```
+
+## Make something
+
+Open the app (or your agent in a terminal) and talk:
+
+> Make an adapter that connects my shop vac hose to the dust port on my table saw
+
+The AI does the rest: reads the design doctrine, creates the project, models the part, runs the printability checks, and opens the live viewer. When it looks right: drag the sliders if you want, click `3mf`, print.
+
+A project is any directory with a `parts/` folder. No init step. New projects are born double-clickable: `viewer.command` opens the viewer from Finder.
+
+## How a part works
+
+Under the hood, a part is a small Python function the AI writes and you never have to read:
 
 ```python
 from nurb import *
@@ -73,7 +93,11 @@ The keyword defaults are the parameters. That one declaration drives the CLI, th
 
 The body of a part is [build123d](https://build123d.readthedocs.io) code on the OCCT kernel. That is why the solids are real B-reps with working chamfers, fillets, and STEP export rather than meshes, and why your model already knows the modelling API.
 
-## Commands
+Because a part is a function, the same part flexes into variants: a card can declare `shelf_3x2` as the shelf with `grid_x = 3`, and every command walks variants like parts, each with its own 3MF and baselines.
+
+## The checks
+
+The AI cannot see, so `nurb check` is its eyes. Rules run against the exact solid and findings come back with coordinates:
 
 ```
 nurb new <name>     create parts/<name>.py and its card
@@ -150,7 +174,7 @@ grid_x = 3
 
 `build`, `check`, `card` and `export` walk variants like parts, so each gets its own 3MF and baselines.
 
-## Layout
+The same file carries preferences like extra export formats:
 
 ```
 parts/<name>.py     the part
@@ -190,7 +214,7 @@ Windows CI (`.github/workflows/windows-build.yml`) runs the Python suite, a Wind
 - `min_wall` probes sample faces, so a pinch nothing lands near is still missed. A clean result means "no thin walls found", not "no thin walls".
 - Authenticode signing of the installer executable itself (SmartScreen). In-app updates are already signed and verified; the installer binary signature is separate and tracked in `docs/windows/RELEASE.md`.
 
-## Debugging the viewer
+## Contributing
 
 `window.__nurb` exposes `{ THREE, scene, camera, controls, mesh, ready }`. The URL takes `?part=<name>`, `?view=iso|front|back|left|right|top`, and `?bare`. three.js is vendored in `src/nurb/vendor/three`, so the viewer needs no network; see the README beside it before changing versions.
 
