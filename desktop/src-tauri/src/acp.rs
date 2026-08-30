@@ -109,7 +109,6 @@ struct ChatSession {
     /// last reported them.
     config: Mutex<Vec<ConfigRow>>,
     pid: u32,
-    pgid: i32,
     /// Per-model effort menus from Grok's initialize `_meta.modelState`. Empty
     /// for agents that speak ACP config options. Needed because switching Grok's
     /// model rebuilds the effort list, and `session/set_model` does not return
@@ -1421,7 +1420,6 @@ async fn run_chat(
                                     config: Mutex::new(config),
                                     pid,
                                     grok_models: menus,
-                                    pgid,
                                     _close: close_tx,
                                 },
                             );
