@@ -55,6 +55,8 @@ def cmd_everything_search(args):
             [es, query],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=15,
         )
     except FileNotFoundError:
@@ -63,7 +65,8 @@ def cmd_everything_search(args):
     except subprocess.TimeoutExpired:
         print("  everything: search timed out after 15s")
         return
-    lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
+    stdout = result.stdout or ""
+    lines = [ln for ln in stdout.splitlines() if ln.strip()]
     if not lines:
         print(f"  everything: no matches for {query!r}")
         return
@@ -85,10 +88,18 @@ def _mcp_handle_everything_search(arguments: dict) -> dict:
             "isError": True,
         }
     try:
-        result = subprocess.run([es, query], capture_output=True, text=True, timeout=15)
+        result = subprocess.run(
+            [es, query],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=15,
+        )
     except Exception as exc:
         return {"content": [{"type": "text", "text": f"search failed: {exc}"}], "isError": True}
-    lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
+    stdout = result.stdout or ""
+    lines = [ln for ln in stdout.splitlines() if ln.strip()]
     if not lines:
         return {"content": [{"type": "text", "text": f"no matches for {query!r}"}], "isError": False}
     return {
