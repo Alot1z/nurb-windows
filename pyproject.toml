@@ -1,6 +1,6 @@
 [project]
 name = "nurb"
-version = "0.22.2"
+version = "0.24.0"
 description = "Agentic CAD for 3D printing"
 readme = "README.md"
 authors = [
@@ -43,8 +43,6 @@ dev = [
 nurb = "nurb_entrypoint:main"
 
 [tool.pytest.ini_options]
-# evals/ is its own uv project with its own suite; collecting it from here fails on
-# its dependencies and would double-run it anyway.
 testpaths = ["tests"]
 
 [build-system]

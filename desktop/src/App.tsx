@@ -8,11 +8,11 @@ import { check, Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import About from "./About";
 import AgentsHelp from "./AgentsHelp";
+import Chat, { AGENT_LABEL, PROJECT_CHAT } from "./Chat";
 import ExtensionsModal, { type ExtensionStatus } from "./ExtensionsModal";
+import GeminiKeyDialog from "./GeminiKeyDialog";
 import type { PluginStatus } from "./plugins";
 import TerminalPanel from "./TerminalPanel";
-import Chat, { AGENT_LABEL, PROJECT_CHAT } from "./Chat";
-import GeminiKeyDialog from "./GeminiKeyDialog";
 import {
   chatKey,
   markChatSeen,
@@ -20,10 +20,13 @@ import {
   updateChatActivity,
   type ChatColumn,
 } from "./chatColumns";
-import { IconCheck, IconCube, IconCubes, IconFolder, IconFolderPlus, IconVariant } from "./Icons";
+import { IconCube, IconCubes, IconFolder, IconFolderPlus, IconGear, IconVariant } from "./Icons";
 import { COLUMNS, fitColumns, initialColumns, resizedColumn } from "./layout";
+import { createLatestRequestGate } from "./latestRequest";
+import Logo from "./Logo";
 import type { Column } from "./layout";
 import { partMessage, type PartConfigurationRequest } from "./partMessages";
+import { createPartRecovery } from "./partRecovery";
 import Setup from "./Setup";
 import Settings from "./Settings";
 import "./App.css";
@@ -108,10 +111,30 @@ function DeleteHints({ places }: { places: string[] }) {
           building
         </span>
       )}
-      <span className="context-hint">
-        moves its files to the {/windows/i.test(navigator.userAgent) ? "Recycle Bin" : "Trash"}
-      </span>
+      <span className="context-hint">moves its files to the Trash</span>
     </>
+  );
+}
+
+// The engine's cold start runs a heavy geometry-kernel import that can take minutes
+// on a busy machine, and a static message over an empty window reads as a frozen app
+// (issue #202: killed and reopened three times while the engine was still starting).
+// A ticking count is the proof of life; the second line sets an honest expectation.
+function EngineStarting() {
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setSeconds((s) => s + 1), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  return (
+    <div className="viewer-status">
+      starting the CAD engine…
+      {seconds >= 10 && (
+        <div className="viewer-status-detail">
+          {seconds}s — a cold start can take a few minutes when the computer is busy
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -135,6 +158,7 @@ const viewportWidth = () => document.documentElement.clientWidth;
 
 function App() {
   const [projects, setProjects] = useState<Project[]>([]);
+  const [projectsLoaded, setProjectsLoaded] = useState(false);
   const [servers, setServers] = useState<Record<string, Server>>({});
   const [opening, setOpening] = useState<Record<string, boolean>>({});
   const [active, setActive] = useState<string | null>(null);
@@ -177,6 +201,8 @@ function App() {
   // nudge. Prefilled, never sent: the lift stays the user's call.
   const [projectSeed, setProjectSeed] = useState<string | null>(null);
   const [agentStatuses, setAgentStatuses] = useState<AgentStatus[]>([]);
+  const [agentStatusState, setAgentStatusState] = useState<"loading" | "ready" | "error">("loading");
+  const agentStatusRequests = useRef(createLatestRequestGate());
   const [signingIn, setSigningIn] = useState<string | null>(null);
   // A UI preference like the agent below, so it persists the same way.
   const [columnWidths, setColumnWidths] = useState(() =>
@@ -253,15 +279,13 @@ function App() {
   const [showAgentsHelp, setShowAgentsHelp] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   // Developer-only extension surface: experimental integrations the app can
-  // host (CLI in a terminal) or launch (external app). Off by
-  // default and absent from the normal feature set.
+  // host (CLI in a terminal) or launch (external app). Off by default and
+  // absent from the normal feature set.
   const [extStatuses, setExtStatuses] = useState<ExtensionStatus[]>([]);
   // The engine's plugin registry for the active project, for the Settings
   // panel's Plugins section. Distinct from extensions: plugins extend the
   // engine (CLI/MCP/checks); extensions are CLIs the app hosts in a terminal.
   const [pluginStatuses, setPluginStatuses] = useState<PluginStatus[]>([]);
-  // Every request gets a generation so a response from a project/server that
-  // was just left cannot overwrite the active project's registry.
   const pluginRequestGeneration = useRef(0);
   const activePluginPath = useRef<string | null>(null);
   activePluginPath.current = active;
@@ -273,18 +297,11 @@ function App() {
   const [projectsFolder, setProjectsFolder] = useState<string | null>(
     () => localStorage.getItem(PROJECTS_FOLDER_KEY),
   );
-
-  const refreshExtensions = useCallback(() => {
-    invoke<ExtensionStatus[]>("extension_statuses")
-      .then(setExtStatuses)
-      .catch(() => {});
-  }, []);
-  // The update this run found. null until the first check settles, so the rail
-  // never flashes a button. The update downloads eagerly once found, so the
-  // restart is instant; a failed background download makes `ready` resolve
-  // false and the install downloads again.
   const [update, setUpdate] = useState<Update | null>(null);
   const [updating, setUpdating] = useState(false);
+  // The one update this run acts on: found once, downloaded eagerly so the
+  // restart is instant. `ready` resolves false if the background download
+  // failed, in which case installing downloads again.
   const found = useRef<{ update: Update; ready: Promise<boolean> } | null>(null);
 
   useEffect(() => {
@@ -295,8 +312,7 @@ function App() {
 
   // Checks run outside the provisioning gate: an app whose first-run setup is
   // broken can still be rescued by an update. `tauri dev` serves the vite dev
-  // build and skips the check entirely. The endpoint is pinned to this fork's
-  // GitHub release (tauri.conf.json), never upstream nurb's channel.
+  // build and skips the check entirely.
   const findUpdate = useCallback(async () => {
     if (!import.meta.env.PROD || found.current) return found.current?.update ?? null;
     const next = await check();
@@ -336,9 +352,9 @@ function App() {
     }
   }, [updating]);
 
-  // The macOS "Check for Updates…" menu item forwards here; Windows users get
-  // the same check from the rail button. Unlike the timed checks, this one
-  // answers even when there is nothing to install.
+  // The macOS "Check for Updates…" item. The menu lives in Rust and the
+  // update state lives here, so the click arrives as an event; unlike the
+  // timed checks, this one answers even when there is nothing to install.
   useEffect(() => {
     const unlisten = listen("menu:check-updates", async () => {
       // The dev build never checks, so saying "newest version" would be a lie.
@@ -365,20 +381,12 @@ function App() {
     };
   }, [findUpdate, installUpdate]);
 
-  useEffect(() => {
-    if (ready !== true) return;
-    invoke<AboutInfo>("about_info").then(setAbout).catch(() => {});
-    invoke<string>("default_projects_folder").then(setDefaultProjectsFolder).catch(() => {});
-  }, [ready]);
-
-
-
   // Two things the embedded viewer cannot do for itself. It forwards mousedowns
   // from its own top strip (the titlebar area lives inside the iframe, out of
   // data-tauri-drag-region's reach) and the shell starts the native window drag.
   // And its STL/STEP buttons write into the project's build folder, then hand
-  // over the path: a webview ignores an <a download>, so the file is revealed
-  // in the file manager (Finder, Explorer) instead of downloaded.
+  // over the path: a webview ignores an <a download>, so the file is revealed in
+  // Finder instead of downloaded.
   const focusProjectChat = useCallback((seed?: string) => {
     // The column itself mounts via the focus effect below, once the project's
     // session list has arrived.
@@ -418,11 +426,59 @@ function App() {
   }, [focusProjectChat]);
 
   const refreshAgents = useCallback(async () => {
-    setAgentStatuses(await invoke<AgentStatus[]>("agent_statuses"));
+    const isLatest = agentStatusRequests.current.begin();
+    setAgentStatusState((state) => state === "ready" ? state : "loading");
+    try {
+      const statuses = await invoke<AgentStatus[]>("agent_statuses");
+      if (!isLatest()) return;
+      setAgentStatuses(statuses);
+      setAgentStatusState("ready");
+    } catch (e) {
+      if (isLatest()) setAgentStatusState((state) => state === "ready" ? state : "error");
+      throw e;
+    }
   }, []);
 
+  const refreshExtensions = useCallback(() => {
+    invoke<ExtensionStatus[]>("extension_statuses")
+      .then(setExtStatuses)
+      .catch(() => {});
+  }, []);
+
+  // Plugins change rarely (a toggle, a scaffold), so they refresh on project
+  // switch and after a Settings toggle, not on a poll.
+  const refreshPlugins = useCallback(() => {
+    const generation = ++pluginRequestGeneration.current;
+    const path = active;
+    if (!path) {
+      setPluginStatuses([]);
+      return;
+    }
+    invoke<PluginStatus[]>("plugin_statuses", { path })
+      .then((list) => {
+        if (pluginRequestGeneration.current !== generation || activePluginPath.current !== path) return;
+        setPluginStatuses(Array.isArray(list) ? list : []);
+      })
+      .catch(() => {
+        if (pluginRequestGeneration.current === generation && activePluginPath.current === path)
+          setPluginStatuses([]);
+      });
+  }, [active]);
+
   useEffect(() => {
-    if (ready === true) refreshAgents();
+    refreshExtensions();
+  }, [refreshExtensions]);
+  useEffect(() => {
+    if (ready === true) refreshAgents().catch(() => {});
+  }, [ready, refreshAgents]);
+
+  // Signing in happens in a terminal or a browser, outside this window, so
+  // coming back is the moment to notice it.
+  useEffect(() => {
+    if (ready !== true) return;
+    const onFocus = () => refreshAgents().catch(() => {});
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
   }, [ready, refreshAgents]);
 
   const chooseAgent = (id: string) => {
@@ -462,6 +518,7 @@ function App() {
   const refreshProjects = useCallback(async () => {
     const list = await invoke<Project[]>("list_projects");
     setProjects(list);
+    setProjectsLoaded(true);
     return list;
   }, []);
 
@@ -530,48 +587,35 @@ function App() {
   // The parent page cannot join the viewer's websocket (the server only admits
   // its own origin), so the parts list refreshes on a light poll instead.
   const activeServer = active ? servers[active] : undefined;
-  // Plugins change rarely (a toggle, a scaffold), so they refresh on project
-  // switch and after a Settings toggle, not on a poll.
-  const refreshPlugins = useCallback(() => {
-    const generation = ++pluginRequestGeneration.current;
-    const path = active;
-    if (!path) {
-      setPluginStatuses([]);
-      return;
-    }
-    invoke<PluginStatus[]>("plugin_statuses", { path })
-      .then((list) => {
-        if (
-          pluginRequestGeneration.current !== generation ||
-          activePluginPath.current !== path
-        ) return;
-        setPluginStatuses(Array.isArray(list) ? list : []);
-      })
-      .catch(() => {
-        if (
-          pluginRequestGeneration.current === generation &&
-          activePluginPath.current === path
-        ) setPluginStatuses([]);
-      });
-  }, [active]);
-  // Invalidate an in-flight request when the selected project or its server
+  // Invalidate an in-flight plugin request when the active project or its server
   // changes, including the transition to no active project.
   useEffect(() => {
     pluginRequestGeneration.current += 1;
   }, [active, activeServer]);
   useEffect(() => {
     if (!active || !activeServer) {
-      setPartState(null);
       setPluginStatuses([]);
+    }
+    refreshPlugins();
+  }, [active, activeServer, refreshPlugins]);
+  // Re-opened Settings is a synchronization boundary: a CLI or another app
+  // may have changed `.nurb/plugins.toml` while Settings was closed.
+  useEffect(() => {
+    if (showSettings && activeServer) refreshPlugins();
+  }, [showSettings, activeServer, refreshPlugins]);
+  useEffect(() => {
+    if (!active || !activeServer) {
+      setPartState(null);
       return;
     }
     setPartState(null);
-    refreshPlugins();
     let stale = false;
+    const recovery = createPartRecovery(() => openProject(active));
     const fetchParts = async () => {
       try {
         const entries = await invoke<Part[]>("list_parts", { path: active });
         if (stale) return;
+        recovery.success();
         setPartState({
           path: active,
           parts: entries
@@ -579,21 +623,23 @@ function App() {
             .sort((a, b) => a.name.localeCompare(b.name)),
         });
       } catch {
-        // The server just closed or is restarting; the effect re-runs on change.
+        if (stale) return;
+        // A brief failure is the server restarting after a save. A run of them
+        // means the engine died, and nothing else ever respawns it. Opening the
+        // project is a no-op while the server is alive, so a false positive is
+        // cheap, and clearing the count means another full run of failures has
+        // to pass before the next attempt.
+        recovery.failure();
       }
     };
     fetchParts();
     const timer = setInterval(fetchParts, 2500);
     return () => {
       stale = true;
+      recovery.stop();
       clearInterval(timer);
     };
-  }, [active, activeServer, refreshPlugins]);
-  // Re-opened Settings is a synchronization boundary: a CLI or another app
-  // may have changed `.nurb/plugins.toml` while Settings was closed.
-  useEffect(() => {
-    if (showSettings && activeServer) refreshPlugins();
-  }, [showSettings, activeServer, refreshPlugins]);
+  }, [active, activeServer, openProject]);
 
   const parts = partState?.path === active ? partState.parts : NO_PARTS;
   const placedIn = useMemo(() => placedInMap(parts), [parts]);
@@ -1123,36 +1169,45 @@ function App() {
                             !
                           </span>
                         )}
+                        {/* Folded-away variants still say how many there are, so the
+                            rail does not hide them without a trace. */}
+                        {part.variants.length > 0 && part.name !== selectedPart && (
+                          <span className="var-count">
+                            <IconVariant size={9} />
+                            {part.variants.length}
+                          </span>
+                        )}
                       </li>
                       {/* The card's variants nest under their part the way the
                           browser viewer draws them: the same part at other values,
-                          wearing the sliders glyph. The active mark follows the
-                          server's resolved variant, so it tracks slider drags and
-                          agent edits too, one poll behind. */}
-                      {part.variants.map((v) => {
-                        const how = Object.entries(v.params)
-                          .map(([k, val]) => `${k} = ${val}`)
-                          .join("\n");
-                        // Drifted off this variant: no longer resolved by the server,
-                        // but still where the work is, so the row stays pinned.
-                        const modified =
-                          part.name === selectedPart &&
-                          part.variant !== v.name &&
-                          variantOrigin?.drifted === true &&
-                          variantOrigin.part === part.name &&
-                          variantOrigin.variant === v.name;
-                        return (
-                          <li
-                            key={`${part.name}:${v.name}`}
-                            className={`part-var ${part.name === selectedPart && part.variant === v.name ? "selected" : ""} ${modified ? "modified" : ""}`}
-                            title={v.note ? `${v.note}\n\n${how}` : how}
-                            onClick={() => selectPart(part.name, v.name)}
-                          >
-                            <IconVariant />
-                            <span className="part-name">{v.name}</span>
-                          </li>
-                        );
-                      })}
+                          wearing the sliders glyph. They unfold under the selection
+                          only, because twenty parts' variants at once is a wall. The
+                          active mark follows the server's resolved variant, so it
+                          tracks slider drags and agent edits too, one poll behind. */}
+                      {part.name === selectedPart &&
+                        part.variants.map((v) => {
+                          const how = Object.entries(v.params)
+                            .map(([k, val]) => `${k} = ${val}`)
+                            .join("\n");
+                          // Drifted off this variant: no longer resolved by the server,
+                          // but still where the work is, so the row stays pinned.
+                          const modified =
+                            part.variant !== v.name &&
+                            variantOrigin?.drifted === true &&
+                            variantOrigin.part === part.name &&
+                            variantOrigin.variant === v.name;
+                          return (
+                            <li
+                              key={`${part.name}:${v.name}`}
+                              className={`part-var ${part.variant === v.name ? "selected" : ""} ${modified ? "modified" : ""}`}
+                              title={v.note ? `${v.note}\n\n${how}` : how}
+                              onClick={() => selectPart(part.name, v.name)}
+                            >
+                              <IconVariant />
+                              <span className="part-name">{v.name}</span>
+                            </li>
+                          );
+                        })}
                       {/* The selection expands to its counterparts: the assemblies
                           that place this part, or the parts this assembly places.
                           Only under the selection, because the relationship is what
@@ -1216,94 +1271,36 @@ function App() {
           <IconFolderPlus />
           add existing…
         </button>
-        {agentStatuses.length > 0 && (
-          <div className="agents">
-            <div className="rail-heading">
-              <span>agents</span>
-            </div>
-            {agentStatuses
-              // Agents whose CLI is not on this PC stay out of the rail;
-              // the "need another agent?" help is where they live.
-              .filter((status) => status.installed)
-              .map((status) => (
-              <div
-                key={status.id}
-                className={
-                  status.id === defaultAgent ? "agent-row selected" : "agent-row"
-                }
-                aria-current={status.id === defaultAgent}
-                title={
-                  status.id === defaultAgent
-                    ? `${status.note} — new conversations use ${AGENT_LABEL[status.id] ?? status.label}`
-                    : `${status.note} — click to use for new conversations`
-                }
-                onClick={() => chooseAgent(status.id)}
-              >
-                <IconCheck
-                  className={
-                    status.id === defaultAgent ? "agent-check" : "agent-check hidden"
-                  }
-                />
-                <span className="agent-name">{AGENT_LABEL[status.id] ?? status.label}</span>
-                {status.loggedIn === false ? (
-                  <button
-                    className="agent-signin"
-                    disabled={signingIn !== null}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      signInAgent(status.id).catch(() => {});
-                    }}
-                  >
-                    {signingIn === status.id ? "signing in…" : "sign in"}
-                  </button>
-                ) : (
-                  <span
-                    className="agent-state"
-                    title={status.loggedIn ? (status.detail ?? "signed in") : undefined}
-                  >
-                    {status.loggedIn ? "signed in" : "status unknown"}
-                  </span>
-                )}
-              </div>
-            ))}
-            <button className="agent-more" onClick={() => setShowAgentsHelp(true)}>
-              need another agent?
-            </button>
-          </div>
-        )}
         {error && <div className="rail-error">{error}</div>}
         <div className="rail-foot">
-          <button
-            className="rail-version"
-            title="experimental developer extensions"
-            onClick={() => {
-              refreshExtensions();
-              setShowExtensions(true);
-            }}
-          >
-            developer extensions
-          </button>
-          <button className="rail-version" onClick={() => setShowSettings(true)}>
-            settings
-          </button>
-          {about && (
-            <button className="rail-version" onClick={() => setShowAbout(true)}>
-              nurb {about.appVersion}
-            </button>
-          )}
-          {update ? (
+          {update && (
             <button className="rail-update" disabled={updating} onClick={installUpdate}>
               {updating ? "updating…" : `update to ${update.version}`}
             </button>
-          ) : (
-            <button
-              className="rail-version"
-              title="check for updates"
-              onClick={() => findUpdate().catch(() => setError("Could not reach the update server."))}
-            >
-              check for updates
-            </button>
           )}
+          <div className="rail-foot-row">
+            {about && (
+              <button className="rail-version" onClick={() => setShowAbout(true)}>
+                nurb {about.appVersion}
+              </button>
+            )}
+            <button
+              className="rail-settings"
+              title="developer extensions"
+              aria-label="developer extensions"
+              onClick={() => setShowExtensions(true)}
+            >
+              <IconCubes />
+            </button>
+            <button
+              className="rail-settings"
+              title="settings"
+              aria-label="settings"
+              onClick={() => setShowSettings(true)}
+            >
+              <IconGear />
+            </button>
+          </div>
         </div>
       </aside>
       {menu && (
@@ -1362,12 +1359,40 @@ function App() {
           customized={projectsFolder !== null}
           onChange={changeProjectsFolder}
           onReset={() => changeProjectsFolder(null)}
+          agents={agentStatuses.filter((status) => status.installed)}
+          agentStatusState={agentStatusState}
+          signingIn={signingIn}
+          onSignIn={signInAgent}
+          onMoreAgents={() => {
+            setShowSettings(false);
+            setShowAgentsHelp(true);
+          }}
           extensions={extStatuses}
           onExtensionsChanged={refreshExtensions}
           plugins={pluginStatuses}
           onPluginsChanged={refreshPlugins}
           projectPath={active ?? ""}
           onClose={() => setShowSettings(false)}
+        />
+      )}
+      {showExtensions && (
+        <ExtensionsModal
+          statuses={extStatuses}
+          projectDir={active}
+          onChanged={refreshExtensions}
+          onOpenTerminal={(ext) => {
+            setShowExtensions(false);
+            setTerminalExt(ext);
+          }}
+          onClose={() => setShowExtensions(false)}
+        />
+      )}
+      {terminalExt && active && (
+        <TerminalPanel
+          id={terminalExt.id}
+          label={terminalExt.label}
+          projectDir={active}
+          onClose={() => setTerminalExt(null)}
         />
       )}
       {showGeminiKey ? (
@@ -1393,28 +1418,8 @@ function App() {
             setShowAgentsHelp(false);
             // The user may have just run an installer; notice it now, not on
             // the next launch.
-            refreshAgents();
+            refreshAgents().catch(() => {});
           }}
-        />
-      )}
-      {showExtensions && (
-        <ExtensionsModal
-          statuses={extStatuses}
-          projectDir={active}
-          onChanged={refreshExtensions}
-          onOpenTerminal={(ext) => {
-            setShowExtensions(false);
-            setTerminalExt(ext);
-          }}
-          onClose={() => setShowExtensions(false)}
-        />
-      )}
-      {terminalExt && active && (
-        <TerminalPanel
-          id={terminalExt.id}
-          label={terminalExt.label}
-          projectDir={active}
-          onClose={() => setTerminalExt(null)}
         />
       )}
       {/* One column per opened chat, all mounted so background turns keep
@@ -1431,12 +1436,13 @@ function App() {
             part={col.part}
             agent={agent}
             agents={agentStatuses
-              // The rail advertises uninstalled agents with an install
-              // hint; the switcher only offers ones that can actually run.
+              // Settings lists uninstalled agents with an install hint; the
+              // switcher only offers ones that can actually run.
               .filter((status) => status.installed)
               .map((status) => ({
                 id: status.id,
                 label: AGENT_LABEL[status.id] ?? status.label,
+                loggedIn: status.loggedIn,
               }))}
             resume={col.resume}
             hidden={!columnVisible(col)}
@@ -1444,7 +1450,12 @@ function App() {
             onSeed={isProject ? () => setProjectSeed(null) : undefined}
             onSession={(id) => chatStarted(col.path, col.part, id, agent)}
             onFresh={() => startFresh(col.path, col.part)}
-            onAgent={(id) => startFresh(col.path, col.part, id)}
+            onAgent={(id, unstarted) => {
+              // Picking an agent before the first message is choosing which
+              // agent you work with, so it sticks for later chats too.
+              if (unstarted) chooseAgent(id);
+              startFresh(col.path, col.part, id);
+            }}
             onBusy={(busy) =>
               chatBusy(col.path, col.part, agent, busy, columnVisible(col))
             }
@@ -1455,7 +1466,37 @@ function App() {
       {!columns.some(columnVisible) && (
         <section className="chat">
           <div className="chat-header" data-tauri-drag-region />
-          <div className="placeholder">chat</div>
+          {projectsLoaded && projects.length === 0 ? (
+            // The zero-project welcome: the one moment the app has to explain
+            // itself, so the create form lives here, not behind the rail's +.
+            <div className="welcome">
+              <Logo size={36} />
+              <div className="welcome-title">Design your first part</div>
+              <p className="welcome-copy">
+                A project holds the parts you design. Name it, then describe
+                what you want to make.
+              </p>
+              <form className="name-form welcome-form" onSubmit={createProject}>
+                <input
+                  className="name-input"
+                  name="name"
+                  placeholder="project name"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  disabled={creating}
+                />
+                <button className="rail-button welcome-create" type="submit" disabled={creating}>
+                  {creating ? "creating…" : "create"}
+                </button>
+              </form>
+              <button className="welcome-existing" onClick={addExisting}>
+                or add an existing folder…
+              </button>
+            </div>
+          ) : (
+            <div className="placeholder">chat</div>
+          )}
         </section>
       )}
       <main className="viewer">
@@ -1476,9 +1517,13 @@ function App() {
             }
           />
         ) : active && opening[active] ? (
-          <div className="viewer-status">starting the CAD engine…</div>
+          <EngineStarting />
         ) : (
-          <div className="viewer-status">open a project to start</div>
+          <div className="viewer-status">
+            {projectsLoaded && projects.length === 0
+              ? "create a project to start"
+              : "open a project to start"}
+          </div>
         )}
       </main>
       <div
