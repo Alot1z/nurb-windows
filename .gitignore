@@ -32,3 +32,6 @@ tmp/
 # Conductor's local, per-checkout settings (not meant to be shared/committed)
 .conductor/
 
+
+# Local guard term list - never commit
+.githooks/ignored-terms.txt
